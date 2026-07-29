@@ -1,0 +1,24 @@
+{
+  "n_questions": 30,
+  "results": [
+    {
+      "config": "contradiction check ON",
+      "n": 30,
+      "errors": 0,
+      "outcomes": {
+        "ungradeable": 4,
+        "wrong": 7,
+        "correct": 13,
+        "fabricated": 4,
+        "abstain": 2
+      },
+      "accuracy": 0.43333333333333335,
+      "wrong_rate": 0.23333333333333334,
+      "abstain_rate": 0.06666666666666667,
+      "null_hit_rate": 0.2,
+      "numbers_per_answer": 3.2,
+      "conflicts_detected": 0,
+      "seconds": 3329.6
+    }
+  ]
+}

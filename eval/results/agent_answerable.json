@@ -1,0 +1,20 @@
+{
+  "n_questions": 5,
+  "results": [
+    {
+      "config": "contradiction check ON",
+      "n": 5,
+      "outcomes": {
+        "correct": 4,
+        "abstain": 1
+      },
+      "accuracy": 0.8,
+      "wrong_rate": 0.0,
+      "abstain_rate": 0.2,
+      "null_hit_rate": 0.6,
+      "numbers_per_answer": 21.8,
+      "conflicts_detected": 0,
+      "seconds": 637.2
+    }
+  ]
+}

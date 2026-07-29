@@ -1,0 +1,126 @@
+{
+  "n_questions": 5,
+  "corrupt_factor": 0.33,
+  "arms": [
+    {
+      "config": "guard ON + injection",
+      "questions": [
+        {
+          "qid": "compare-AAPLMSFT-ResearchAndDevelopmentExpense-2024",
+          "verdict": "ungradeable",
+          "injected": true,
+          "injected_value": "$10.35 billion",
+          "conflicts_detected": 1,
+          "unresolved": 0,
+          "corrupted_value_in_answer": false
+        },
+        {
+          "qid": "delta-AAPL-ResearchAndDevelopmentExpense-2024",
+          "verdict": "correct",
+          "injected": true,
+          "injected_value": "$9.87 billion",
+          "conflicts_detected": 1,
+          "unresolved": 0,
+          "corrupted_value_in_answer": false
+        },
+        {
+          "qid": "ratio-AAPL-ResearchAndDevelopmentExpense-2024",
+          "verdict": "correct",
+          "injected": true,
+          "injected_value": "$10.35 billion",
+          "conflicts_detected": 1,
+          "unresolved": 0,
+          "corrupted_value_in_answer": false
+        },
+        {
+          "qid": "trend-AAPLMSFT-rd-2024",
+          "verdict": "abstain",
+          "injected": true,
+          "injected_value": "81,655.86",
+          "conflicts_detected": 1,
+          "unresolved": 1,
+          "corrupted_value_in_answer": true
+        },
+        {
+          "qid": "compare-AAPLMSFT-NetIncomeLoss-2024",
+          "verdict": "ungradeable",
+          "injected": true,
+          "injected_value": "29,141.64",
+          "conflicts_detected": 1,
+          "unresolved": 0,
+          "corrupted_value_in_answer": false
+        }
+      ],
+      "seconds": 1033.2,
+      "summary": {
+        "n": 5,
+        "injections": 5,
+        "detection_rate": 1.0,
+        "correct": 2,
+        "wrong": 0,
+        "abstain": 1,
+        "contaminated": 1
+      }
+    },
+    {
+      "config": "guard OFF + injection",
+      "questions": [
+        {
+          "qid": "compare-AAPLMSFT-ResearchAndDevelopmentExpense-2024",
+          "verdict": "ungradeable",
+          "injected": true,
+          "injected_value": "$9.74 billion",
+          "conflicts_detected": 0,
+          "unresolved": 0,
+          "corrupted_value_in_answer": false
+        },
+        {
+          "qid": "delta-AAPL-ResearchAndDevelopmentExpense-2024",
+          "verdict": "abstain",
+          "injected": true,
+          "injected_value": "$9.87 billion",
+          "conflicts_detected": 0,
+          "unresolved": 0,
+          "corrupted_value_in_answer": true
+        },
+        {
+          "qid": "ratio-AAPL-ResearchAndDevelopmentExpense-2024",
+          "verdict": "abstain",
+          "injected": true,
+          "injected_value": "$129.04 billion",
+          "conflicts_detected": 0,
+          "unresolved": 0,
+          "corrupted_value_in_answer": true
+        },
+        {
+          "qid": "trend-AAPLMSFT-rd-2024",
+          "verdict": "ungradeable",
+          "injected": true,
+          "injected_value": "$9.74 billion",
+          "conflicts_detected": 0,
+          "unresolved": 0,
+          "corrupted_value_in_answer": false
+        },
+        {
+          "qid": "compare-AAPLMSFT-NetIncomeLoss-2024",
+          "verdict": "ungradeable",
+          "injected": true,
+          "injected_value": "30,932.88",
+          "conflicts_detected": 0,
+          "unresolved": 0,
+          "corrupted_value_in_answer": true
+        }
+      ],
+      "seconds": 551.1,
+      "summary": {
+        "n": 5,
+        "injections": 5,
+        "detection_rate": 0.0,
+        "correct": 0,
+        "wrong": 0,
+        "abstain": 2,
+        "contaminated": 3
+      }
+    }
+  ]
+}

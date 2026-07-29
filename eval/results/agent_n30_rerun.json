@@ -1,0 +1,21 @@
+{
+  "n_questions": 14,
+  "results": [
+    {
+      "config": "contradiction check ON",
+      "n": 14,
+      "errors": 0,
+      "outcomes": {
+        "correct": 13,
+        "wrong": 1
+      },
+      "accuracy": 0.9285714285714286,
+      "wrong_rate": 0.07142857142857142,
+      "abstain_rate": 0.0,
+      "null_hit_rate": 0.2857142857142857,
+      "numbers_per_answer": 9.4,
+      "conflicts_detected": 0,
+      "seconds": 1450.9
+    }
+  ]
+}

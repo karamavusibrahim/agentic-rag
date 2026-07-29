@@ -1,0 +1,21 @@
+{
+  "n_questions": 6,
+  "results": [
+    {
+      "config": "contradiction check ON",
+      "n": 6,
+      "outcomes": {
+        "correct": 3,
+        "wrong": 2,
+        "fabricated": 1
+      },
+      "accuracy": 0.5,
+      "wrong_rate": 0.3333333333333333,
+      "abstain_rate": 0.0,
+      "null_hit_rate": 0.0,
+      "numbers_per_answer": 20.2,
+      "conflicts_detected": 0,
+      "seconds": 516.4
+    }
+  ]
+}
