@@ -407,6 +407,56 @@ The episode is the project's thesis in miniature: the dramatic result was an
 artifact, the boring result survived, and the difference was only visible
 because empty answers were *inspected* rather than trusted as verdicts.
 
+### 5.6 Optional: dual specialized critics (deep-research technique, A/B'd)
+
+Deep-research (2026-07-30) surfaced a strongly quantified critic-agent result
+on financial numeric QA (ICAIF '24, doi:10.1145/3677052.3698686): a critic
+reviewing reasoning and answer adds +15% accuracy for an 8B model / +5% for a
+70B, and **two specialized critics — one verifying figures against evidence,
+one verifying calculation — beat one general critic** (FinQA 54.7% → 64.1% →
+72.5% for the 8B). The split maps directly onto this agent's architecture, so
+it was implemented as an optional post-synthesis pass
+(`MultiHopAgent(verify_answer="dual")`, eval flag `--verify dual`): two
+critics, and one revision round if either objects. Default off — it costs 2–3
+extra model calls per question, and the paper's own data says gains shrink as
+the base gets stronger.
+
+A/B on the 10 answerable questions (same qids as the n=30 baseline subset):
+
+| | baseline | dual critics |
+|---|---|---|
+| correct | 9/10 | **10/10** |
+| wrong | 1/10 | 0/10 |
+| seconds | ~600 | 864 |
+
+The flipped question is the baseline's honest-miss comparison (failed AAPL
+retrieval → "cannot compare"). Read this with the discipline the rest of the
+report demands: single runs of a nondeterministic agent, n=10, and the flip is
+equally consistent with retrieval simply succeeding on the rerun. What the A/B
+does establish: the critics cost ~40% latency, broke nothing (no correct
+answer was argued into a wrong revision — the published failure mode of
+critique loops), and the ceiling at this baseline (0.83–0.90) leaves little
+headroom, exactly as the paper's strong-model trend predicts. The mode is
+worth its place as an option; the evidence does not support making it the
+default.
+
+### 5.7 Strict conclusion-sentence grading: a load-bearing null result
+
+The last standing metric caveat was "a matching figure *anywhere* in the
+answer counts". A strict mode was added (`--grade strict`): only the answer's
+conclusion sentence — the first sentence stating a percent figure — is
+eligible to match. Re-grading all 30 stored answers:
+
+```
+loose : 26 correct  2 wrong  2 abstain
+strict: 26 correct  2 wrong  2 abstain    (zero verdicts changed)
+```
+
+The looseness existed but was never being exploited: this agent's synthesis
+prompt leads with the answer, so the conclusion sentence and "anywhere in the
+answer" coincide in practice. The caveat retires with data rather than with a
+promise, and strict mode remains available for agents with chattier outputs.
+
 ---
 
 ## 6. Engineering notes

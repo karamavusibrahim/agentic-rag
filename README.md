@@ -193,8 +193,17 @@ get an honest number, and both are the interesting part:
   30 questions in one run. The chain now advances on empty output and the
   grader has an `empty_answer` outcome (see REPORT §5.5).
 
-Remaining looseness: a matching figure anywhere in the answer still counts;
-tightening to the headline sentence is the next step.
+The "matching figure anywhere in the answer" looseness was then tested
+directly: a strict mode (`--grade strict`) grades only the conclusion
+sentence, and re-grading all 30 answers **changed zero verdicts** — the
+caveat retired with data (REPORT §5.7).
+
+**Optional: dual specialized critics** (`--verify dual`, off by default) — a
+figures-vs-evidence critic plus a calculation critic with one revision round,
+after the ICAIF '24 result that two specialized critics beat one general
+critic on FinQA-class tasks. A/B on 10 questions: 9/10 → 10/10 at ~40% extra
+latency, with the flip attributable to either the critics or run-to-run
+nondeterminism — see REPORT §5.6 for the honest read.
 
 **The contradiction guard is now validated — by fault injection, not by
 nature.** Across every natural run, `conflicts detected = 0` (mostly-successful

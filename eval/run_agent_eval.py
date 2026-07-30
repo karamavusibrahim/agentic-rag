@@ -187,7 +187,21 @@ def grade_categorical(answer: str, gold: str, other: str) -> str:
     return "ungradeable"
 
 
-def grade(q: dict[str, Any], answer: str) -> str:
+def conclusion_sentence(answer: str) -> str | None:
+    """The first sentence that states a percent figure -- the answer's claim.
+
+    Strict grading scores only this sentence, so a correct figure buried in
+    the supporting detail of an answer whose *headline* is wrong no longer
+    earns the point. Citations are stripped first for the usual reason.
+    """
+    text = _FORM_TOKENS.sub(" ", _CITATION.sub(" ", answer)).replace("−", "-")
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if any(pct for _, pct in numbers_in(sentence)):
+            return sentence
+    return None
+
+
+def grade(q: dict[str, Any], answer: str, *, strict: bool = False) -> str:
     """Outcome for one question.
 
     The stated conclusion is graded *before* the abstain check: a complete,
@@ -215,7 +229,13 @@ def grade(q: dict[str, Any], answer: str) -> str:
     target = q.get("answer_numeric")
     if target is None:
         return "ungradeable"
-    if matches(target, numbers_in(answer), unit=q.get("answer_unit")):
+    scope = answer
+    if strict:
+        sent = conclusion_sentence(answer)
+        if sent is None:
+            return "abstain" if abstained(answer) else "ungradeable"
+        scope = sent
+    if matches(target, numbers_in(scope), unit=q.get("answer_unit")):
         return "correct"
     return "abstain" if abstained(answer) else "wrong"
 
@@ -240,7 +260,8 @@ def null_hit(q: dict[str, Any], answer: str, others: list[dict[str, Any]]) -> bo
 
 
 def run_config(agent: MultiHopAgent, questions: list[dict[str, Any]],
-               label: str, traces_out: Path | None) -> dict[str, Any]:
+               label: str, traces_out: Path | None,
+               strict: bool = False) -> dict[str, Any]:
     outcomes: Counter[str] = Counter()
     nulls = 0
     n_numbers = 0
@@ -258,7 +279,7 @@ def run_config(agent: MultiHopAgent, questions: list[dict[str, Any]],
             outcomes["error"] += 1
             continue
 
-        verdict = grade(q, answer)
+        verdict = grade(q, answer, strict=strict)
         # An abstention (or a control "correct"-by-abstention) that coincides
         # with failed extractions is not evidence of honesty -- during an API
         # outage every hop reads "not found" and the agent abstains everywhere.
@@ -273,6 +294,7 @@ def run_config(agent: MultiHopAgent, questions: list[dict[str, Any]],
         traces.append({"qid": q["qid"], "type": q["type"], "verdict": verdict,
                        "gold": q.get("answer_numeric") or q.get("answer_categorical"),
                        "answer": answer, "extract_errors": n_err,
+                       "verification": trace.verification,
                        "conflicts": len(trace.conflicts),
                        "unresolved": sum(1 for c in trace.conflicts if c.unresolved)})
         print(f"  [{i}/{len(questions)}] {verdict:<11} {q['qid']}")
@@ -307,6 +329,10 @@ def main() -> int:
     ap.add_argument("--eval-set", type=Path, default=Path("data/eval/multihop.jsonl"))
     ap.add_argument("--limit", type=int, default=12)
     ap.add_argument("--types", default="trend,ratio,delta,compare,unanswerable")
+    ap.add_argument("--grade", choices=("loose", "strict"), default="loose",
+                    help="strict grades only the answer's conclusion sentence")
+    ap.add_argument("--verify", choices=("off", "dual"), default="off",
+                    help="dual runs two specialized post-synthesis critics")
     ap.add_argument("--qids", default=None,
                     help="comma-separated qids to run (overrides --limit; for "
                          "re-running questions lost to infrastructure failures)")
@@ -354,9 +380,11 @@ def main() -> int:
     rows = []
     if args.config in ("on", "both"):
         print("=== contradiction check ON ===")
-        rows.append(run_config(MultiHopAgent(search), questions,
-                               "contradiction check ON",
-                               Path("eval/results/traces_on.json")))
+        rows.append(run_config(
+            MultiHopAgent(search,
+                          verify_answer=None if args.verify == "off" else args.verify),
+            questions, "contradiction check ON",
+            Path("eval/results/traces_on.json"), strict=args.grade == "strict"))
     if args.config in ("off", "both") or args.ablate:
         print("\n=== contradiction check OFF ===")
         rows.append(run_config(MultiHopAgent(search, check_contradictions=False),

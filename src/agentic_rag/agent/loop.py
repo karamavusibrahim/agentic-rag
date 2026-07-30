@@ -111,6 +111,7 @@ class Trace:
     conflicts: list[Conflict] = field(default_factory=list)
     answer: str = ""
     model_calls: int = 0
+    verification: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -235,6 +236,55 @@ Rules:
   computing with it.
 - Be concise: lead with the answer, then the supporting figures."""
 
+NUMBERS_CRITIC_PROMPT = """You verify FIGURES only. Check the draft answer
+against the evidence: every number in the answer must appear in the evidence
+verbatim or be exact arithmetic on evidence numbers. Flag any figure that is
+absent, altered, mislabelled (wrong company/metric/year), or of implausible
+magnitude for its label.
+
+Question: {question}
+
+Evidence:
+{evidence}
+
+Draft answer:
+{answer}
+
+Respond with JSON only: {{"ok": true/false, "issues": ["<one sentence per
+problem figure>", ...]}}. Empty issues list if all figures check out."""
+
+REASONING_CRITIC_PROMPT = """You verify CALCULATION AND LOGIC only, not
+sourcing. Check the draft answer's arithmetic (recompute every operation),
+its comparisons (does the stated winner match the stated numbers?), and
+whether the conclusion actually answers the question asked (right company,
+right metric, right period, right direction of change).
+
+Question: {question}
+
+Draft answer:
+{answer}
+
+Respond with JSON only: {{"ok": true/false, "issues": ["<one sentence per
+error>", ...]}}. Empty issues list if the reasoning is sound."""
+
+REVISE_PROMPT = """Your draft answer was reviewed and problems were found.
+Rewrite it, fixing ONLY the listed problems. Keep every rule from before:
+figures only from the evidence, cite in brackets, show arithmetic, report
+conflicts rather than choosing.
+
+Question: {question}
+
+Evidence:
+{evidence}
+
+Draft answer:
+{draft}
+
+Problems found by review:
+{feedback}
+
+Write the corrected answer."""
+
 
 class MultiHopAgent:
     def __init__(
@@ -246,6 +296,7 @@ class MultiHopAgent:
         per_hop_k: int = 5,
         max_rounds: int = 2,
         check_contradictions: bool = True,
+        verify_answer: str | None = None,
     ):
         """`search(query, k)` returns objects exposing .text, .chunk_id and
         .citation() -- the sec_rag Retriever satisfies this, but any retriever
@@ -260,6 +311,17 @@ class MultiHopAgent:
         # and that claim is only worth anything if it can be measured against
         # the same agent with the check disabled.
         self.check_contradictions = check_contradictions
+        # Optional post-synthesis verification. "dual" runs two SPECIALIZED
+        # critics -- one verifying that every figure in the answer traces to
+        # the extracted evidence, one verifying the calculation/reasoning --
+        # and, if either objects, re-synthesizes once with their feedback.
+        # Two critics rather than one general critic because the split is what
+        # measured best on financial numeric QA (ICAIF'24,
+        # doi:10.1145/3677052.3698686: FinQA 54.7% -> 64.1% one critic ->
+        # 72.5% two specialized critics for an 8B model). Default off: it
+        # costs 2-3 extra model calls per question, and published gains shrink
+        # as the base model strengthens.
+        self.verify_answer = verify_answer
 
     # -- steps ------------------------------------------------------------
 
@@ -374,15 +436,53 @@ class MultiHopAgent:
             return []
         return [str(q) for q in data["rewritten"]][: len(failed) + 1]
 
-    def synthesize(self, question: str, evidence: Sequence[Evidence],
-                   conflicts: Sequence[Conflict] = ()) -> str:
+    def _render_evidence(self, evidence: Sequence[Evidence],
+                         conflicts: Sequence[Conflict] = ()) -> str:
         # Conflicted figures are replaced by their adjudicated result (or an
         # explicit UNRESOLVED marker), so the raw disagreeing values never
         # reach the synthesizer as equal-looking options.
         conflicted_ids = {id(c) for conf in conflicts for c in conf.candidates}
         lines = [e.render() for e in evidence if id(e) not in conflicted_ids]
         lines += [c.render() for c in conflicts]
-        rendered = "\n".join(lines) or "(no evidence found)"
+        return "\n".join(lines) or "(no evidence found)"
+
+    def dual_critique(self, question: str, evidence: Sequence[Evidence],
+                      answer: str) -> list[str]:
+        """Two specialized critics: figures-vs-evidence, and reasoning.
+
+        Returns the combined issue list (empty = both critics passed). A
+        critic that fails outright contributes nothing rather than blocking --
+        the verification layer must never be the reason an answer is lost.
+        """
+        rendered = self._render_evidence(evidence)
+        issues: list[str] = []
+        for prompt in (
+            NUMBERS_CRITIC_PROMPT.format(question=question, evidence=rendered,
+                                         answer=answer),
+            REASONING_CRITIC_PROMPT.format(question=question, answer=answer),
+        ):
+            try:
+                data, _ = chat_json_chain(
+                    self.planner_models,
+                    [{"role": "user", "content": prompt}],
+                    validate=lambda d: "ok" in d,
+                    max_tokens=400,
+                )
+                if not data.get("ok"):
+                    issues += [str(i) for i in (data.get("issues") or [])][:3]
+            except Exception as exc:  # noqa: BLE001
+                print(f"    critic failed (skipping): {exc}", file=sys.stderr)
+        return issues
+
+    def synthesize(self, question: str, evidence: Sequence[Evidence],
+                   conflicts: Sequence[Conflict] = (), *,
+                   feedback: str | None = None, draft: str | None = None) -> str:
+        rendered = self._render_evidence(evidence, conflicts)
+        if feedback is not None and draft is not None:
+            content = REVISE_PROMPT.format(question=question, evidence=rendered,
+                                           draft=draft, feedback=feedback)
+        else:
+            content = SYNTH_PROMPT.format(question=question, evidence=rendered)
         # Same fallback discipline as every other model call: this was the one
         # hard-coded single-model call left, which meant a model EOL (HTTP 410)
         # would fail the run at the final step after every hop had succeeded.
@@ -391,8 +491,7 @@ class MultiHopAgent:
             try:
                 answer = chat(
                     model,
-                    [{"role": "user", "content": SYNTH_PROMPT.format(
-                        question=question, evidence=rendered)}],
+                    [{"role": "user", "content": content}],
                     max_tokens=1200,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -489,4 +588,20 @@ class MultiHopAgent:
 
         trace.answer = self.synthesize(question, trace.evidence, conflicts)
         trace.model_calls += 1
+
+        if self.verify_answer == "dual" and trace.answer.strip():
+            issues = self.dual_critique(question, trace.evidence, trace.answer)
+            trace.model_calls += 2
+            trace.verification = {"issues": issues, "revised": False}
+            if issues:
+                feedback = "\n".join(f"- {i}" for i in issues)
+                revised = self.synthesize(
+                    question, trace.evidence, conflicts,
+                    feedback=feedback, draft=trace.answer)
+                trace.model_calls += 1
+                if revised.strip():
+                    trace.answer = revised
+                    trace.verification["revised"] = True
+                if verbose:
+                    print(f"   critics raised {len(issues)} issue(s); revised")
         return trace
