@@ -22,7 +22,7 @@ from dotenv import load_dotenv  # noqa: E402
 from agentic_rag.nvidia import chat  # noqa: E402
 
 CANDIDATES = [
-    "deepseek-ai/deepseek-v4-flash",
+    "deepseek-ai/deepseek-v4-flash-0731",
     "deepseek-ai/deepseek-v4-pro",
     "nvidia/nemotron-3-super-120b-a12b",
     "nvidia/nemotron-3-nano-30b-a3b",

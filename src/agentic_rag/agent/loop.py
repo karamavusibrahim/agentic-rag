@@ -54,12 +54,12 @@ from .contradictions import Conflict, find_conflicts, period_mismatch, resolve
 #
 # Ordered by observed JSON reliability (probed 2026-07-26).
 PLANNER_MODELS = (
-    "deepseek-ai/deepseek-v4-flash",       # cleanest raw JSON of the live set
+    "deepseek-ai/deepseek-v4-flash-0731",       # cleanest raw JSON of the live set
     "nvidia/nemotron-3-super-120b-a12b",   # strong, needs reasoning suppression
     "openai/gpt-oss-120b",                 # emits into reasoning_content
 )
 EXTRACTOR_MODELS = (
-    "deepseek-ai/deepseek-v4-flash",
+    "deepseek-ai/deepseek-v4-flash-0731",
     "nvidia/nemotron-3-nano-30b-a3b",      # cheap; fine for single-fact extraction
     "nvidia/nemotron-3-super-120b-a12b",
 )
@@ -365,7 +365,12 @@ class MultiHopAgent:
         met = (data.get("metric") or None)
         per = (data.get("period") or None)
 
-        if not data.get("found"):
+        # `found` has to be a real boolean. Models return the *string* "false"
+        # often enough that a plain truthiness test silently converts a refusal
+        # into a positive extraction -- and `str(False)` then renders the value
+        # as the literal text "False", which flows into synthesis as if it were
+        # a figure read off a filing.
+        if data.get("found") is not True:
             return Evidence(sub_question, False, None, None, None, None,
                             entity=ent, metric=met, period=per)
 
@@ -385,12 +390,26 @@ class MultiHopAgent:
             return Evidence(sub_question, False, None, None, None, None,
                             entity=ent, metric=met, period=per)
 
+        # An extraction with no value is not an extraction. Letting it through
+        # as found=True puts "None" in front of the synthesizer with a real
+        # citation attached to it.
+        value = str(data.get("value") or "").strip() or None
+        if value is None:
+            return Evidence(sub_question, False, None, None, None, None,
+                            entity=ent, metric=met, period=per)
+
+        # Same reasoning as contradictions.resolve: if the model did not cite a
+        # passage we actually showed it, we do not know where the figure came
+        # from, so we must not manufacture a citation for it.
         n = data.get("passage_number")
-        hit = hits[n - 1] if isinstance(n, int) and 1 <= n <= len(hits) else hits[0]
+        if not (isinstance(n, int) and 1 <= n <= len(hits)):
+            return Evidence(sub_question, False, None, None, None, None,
+                            entity=ent, metric=met, period=per)
+        hit = hits[n - 1]
         return Evidence(
             sub_question=sub_question,
             found=True,
-            value=str(data.get("value", "")).strip() or None,
+            value=value,
             quote=(data.get("quote") or None),
             chunk_id=hit.chunk_id,
             citation=hit.citation(),

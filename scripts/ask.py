@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from dotenv import load_dotenv  # noqa: E402
 
 from agentic_rag.agent.loop import MultiHopAgent  # noqa: E402
+from agentic_rag.search_modes import make_search  # noqa: E402
 from sec_rag.index.build import load as load_index  # noqa: E402
 from sec_rag.retrieve.hybrid import Retriever  # noqa: E402
 
@@ -33,6 +34,9 @@ def main() -> int:
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--per-hop-k", type=int, default=5)
     ap.add_argument("--max-rounds", type=int, default=2)
+    ap.add_argument("--search-mode", choices=("dense", "relgrep"), default="dense",
+                    help="relgrep = optional relevance-guided corpus grep "
+                         "(arXiv 2607.24223)")
     ap.add_argument("--trace", type=Path, help="write the full trace as JSON")
     args = ap.parse_args()
 
@@ -48,13 +52,7 @@ def main() -> int:
 
     index = load_index(args.index)
     retriever = Retriever(index)
-
-    # Dense + rerank, no BM25: measured as the strongest configuration on this
-    # corpus (see sec-rag/eval/results/retrieval.json -- hybrid fusion actually
-    # hurt on numeric questions).
-    def search(q: str, k: int):
-        return retriever.search(q, top_k=k, candidates=40,
-                                use_dense=True, use_sparse=False, use_rerank=True)
+    search = make_search(retriever, mode=args.search_mode, candidates=40)
 
     agent = MultiHopAgent(search, per_hop_k=args.per_hop_k, max_rounds=args.max_rounds)
 

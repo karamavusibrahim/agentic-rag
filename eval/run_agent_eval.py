@@ -49,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from dotenv import load_dotenv  # noqa: E402
 
 from agentic_rag.agent.loop import MultiHopAgent  # noqa: E402
+from agentic_rag.search_modes import make_search  # noqa: E402
 from sec_rag.index.build import load as load_index  # noqa: E402
 from sec_rag.retrieve.hybrid import Retriever  # noqa: E402
 
@@ -345,6 +346,9 @@ def main() -> int:
     # Default is a single arm: "both" previously required --ablate as well,
     # which silently skipped the OFF arm for anyone who took the flag at its word.
     ap.add_argument("--config", choices=("on", "off", "both"), default="on")
+    ap.add_argument("--search-mode", choices=("dense", "relgrep"), default="dense",
+                    help="relgrep = optional relevance-guided corpus grep "
+                         "(arXiv 2607.24223); dense is the measured default")
     ap.add_argument("--out", type=Path, default=Path("eval/results/agent.json"))
     args = ap.parse_args()
 
@@ -368,11 +372,7 @@ def main() -> int:
 
     index = load_index(args.index)
     retriever = Retriever(index)
-    # Dense + rerank, no BM25 -- the configuration sec-rag's ablation measured as
-    # best on this corpus, where RRF fusion actively hurt.
-    def search(query: str, k: int):
-        return retriever.search(query, top_k=k, candidates=50,
-                                use_dense=True, use_sparse=False, use_rerank=True)
+    search = make_search(retriever, mode=args.search_mode, candidates=50)
 
     print(f"corpus {len(index)} chunks | {len(questions)} questions "
           f"({Counter(q['type'] for q in questions)})\n")

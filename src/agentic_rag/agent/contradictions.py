@@ -80,6 +80,35 @@ def values_agree(a: float | None, b: float | None,
     return scale > 0 and abs(a - b) / scale <= tolerance
 
 
+def value_in_passage(value: str, passage: str,
+                     *, tolerance: float = REL_TOLERANCE) -> bool:
+    """Is the resolved figure actually present in the passage that was cited?
+
+    Filings and extractions disagree about presentation, not magnitude: the
+    passage prints "12,914" inside a table captioned "in millions" while the
+    extractor reports "$12,914 million". So compare magnitudes rather than
+    strings, and allow the passage's number to be the same figure written at a
+    thousands/millions/billions scale.
+
+    A non-numeric value (e.g. "the Americas segment") cannot be checked this
+    way, so fall back to a case-insensitive substring test.
+    """
+    target = parse_magnitude(value)
+    if target is None:
+        needle = value.strip().lower()
+        return bool(needle) and needle in passage.lower()
+    if target == 0:
+        return "0" in passage
+    for m in _NUM_RE.finditer(passage):
+        found = parse_magnitude(m.group(0))
+        if found is None:
+            continue
+        for scale in (1.0, 1e3, 1e6, 1e9):
+            if values_agree(target, found * scale, tolerance=tolerance):
+                return True
+    return False
+
+
 @dataclass
 class Conflict:
     key: tuple[str, str, str]
@@ -291,8 +320,30 @@ def resolve(
         conflict.reason = str(data.get("reason") or "passages did not settle it")
         return conflict
 
+    # The passage index has to be a real index into what we actually sent. The
+    # previous `else hits[0]` silently attached the first passage's citation to
+    # a value the model may have read somewhere else -- or invented -- which is
+    # exactly the failure the guard exists to prevent.
     n = data.get("passage_number")
-    hit = hits[n - 1] if isinstance(n, int) and 1 <= n <= len(hits) else hits[0]
+    if not (isinstance(n, int) and 1 <= n <= len(hits)):
+        conflict.reason = (
+            f"verifier did not cite a passage it was shown (passage_number={n!r})"
+        )
+        return conflict
+    hit = hits[n - 1]
+
+    # `resolved_value` is rendered to the synthesizer as "(verified)". That word
+    # has to mean something, so require the figure to actually occur in the
+    # passage the verifier cited. Without this the resolver is free to return a
+    # value that appears in no passage at all and have it enter synthesis
+    # carrying more authority than the conflicting extractions it replaced.
+    if not value_in_passage(str(value), hit.text):
+        conflict.reason = (
+            f"verifier returned {value!r}, which does not appear in the passage "
+            f"it cited ({hit.citation()})"
+        )
+        return conflict
+
     conflict.resolved_value = str(value)
     conflict.resolved_chunk_id = hit.chunk_id
     conflict.reason = str(data.get("reason") or "")

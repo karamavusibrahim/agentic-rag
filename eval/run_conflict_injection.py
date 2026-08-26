@@ -48,6 +48,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 from agentic_rag.agent.contradictions import parse_magnitude  # noqa: E402
 from agentic_rag.agent.loop import Evidence, MultiHopAgent  # noqa: E402
+from agentic_rag.search_modes import make_search  # noqa: E402
 from run_agent_eval import grade, numbers_in  # noqa: E402
 from sec_rag.index.build import load as load_index  # noqa: E402
 from sec_rag.retrieve.hybrid import Retriever  # noqa: E402
@@ -137,6 +138,7 @@ def main() -> int:
     ap.add_argument("--index", type=Path, default=Path("../sec-rag/data/processed"))
     ap.add_argument("--eval-set", type=Path, default=Path("data/eval/multihop.jsonl"))
     ap.add_argument("--limit", type=int, default=5)
+    ap.add_argument("--search-mode", choices=("dense", "relgrep"), default="dense")
     ap.add_argument("--out", type=Path,
                     default=Path("eval/results/conflict_injection.json"))
     args = ap.parse_args()
@@ -154,10 +156,7 @@ def main() -> int:
 
     index = load_index(args.index)
     retriever = Retriever(index)
-
-    def search(query: str, k: int):
-        return retriever.search(query, top_k=k, candidates=50,
-                                use_dense=True, use_sparse=False, use_rerank=True)
+    search = make_search(retriever, mode=args.search_mode, candidates=50)
 
     results = []
     for check_on in (True, False):
@@ -198,15 +197,32 @@ def main() -> int:
         arm["seconds"] = round(time.time() - t0, 1)
         qs = [r for r in arm["questions"] if "error" not in r]
         inj = [r for r in qs if r["injected"]]
+        # Report the denominator every rate is over. `correct + wrong + abstain`
+        # does not equal `n`: `grade` also returns "ungradeable", and the two
+        # arms do not produce the same number of them, so a bare "correct 0 -> 2"
+        # compares counts taken over different-sized gradeable sets. Anyone
+        # reading the arms has to be able to see that.
+        gradeable = [r for r in qs if r["verdict"] in ("correct", "wrong", "abstain")]
+        detected = sum(1 for r in inj if r["conflicts_detected"] > 0)
         arm["summary"] = {
             "n": len(qs),
+            "errors": len(arm["questions"]) - len(qs),
             "injections": len(inj),
-            "detection_rate": (sum(1 for r in inj if r["conflicts_detected"] > 0)
-                               / max(len(inj), 1)),
+            # None, not 0.0: with no injections the guard was never given
+            # anything to catch, which is not the same as failing to catch it.
+            "detection_rate": (detected / len(inj)) if inj else None,
+            "detected": detected,
+            "n_gradeable": len(gradeable),
+            "ungradeable": len(qs) - len(gradeable),
             "correct": sum(1 for r in qs if r["verdict"] == "correct"),
             "wrong": sum(1 for r in qs if r["verdict"] == "wrong"),
             "abstain": sum(1 for r in qs if r["verdict"] == "abstain"),
             "contaminated": sum(1 for r in qs if r["corrupted_value_in_answer"]),
+            # The questions are generated per (concept, year) from a shared
+            # pool, so several of them ask about the same underlying figure in
+            # different shapes. That makes them correlated, not independent
+            # trials, and the count below is the honest sample size.
+            "distinct_facts": len({r["qid"].rsplit("-", 2)[-2:][0] for r in qs}),
         }
         print(f"  summary: {arm['summary']}")
         results.append(arm)

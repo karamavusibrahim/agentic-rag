@@ -205,18 +205,51 @@ critic on FinQA-class tasks. A/B on 10 questions: 9/10 → 10/10 at ~40% extra
 latency, with the flip attributable to either the critics or run-to-run
 nondeterminism — see REPORT §5.6 for the honest read.
 
-**The contradiction guard is now validated — by fault injection, not by
-nature.** Across every natural run, `conflicts detected = 0` (mostly-successful
-2-hop questions never extract the same figure twice), so the guard's value was
-measured by injecting the failure it exists to catch: a corrupted twin
-extraction per question (value ×0.33, variant entity/period spellings so the
-grouping normalizers are genuinely exercised, real chunk ids). Result —
-detection **5/5**; the corrupted figure reached the final answer **3/5 with
-the guard off vs 1/5 with it on** (and that one was an abstention quoting the
-conflict, not an assertion); correct answers 0 → 2
-(`eval/run_conflict_injection.py`, REPORT §5.3). The audit had also found and
-fixed two reasons conflicts could silently fail to form: first-year-only
-period keys and non-numeric values that always "conflicted".
+**Optional: relevance-guided corpus grep** (`--search-mode relgrep`, off by
+default) — after "A New Role for Relevance: Guiding Corpus Interaction in
+Agentic Search" (arXiv 2607.24223): when a hop query names a company and a
+fiscal year, take the exact-match subset of the corpus (a conjunctive filter
+no bag-of-words retriever provides) and order it coarse-to-fine with the
+hosted reranker; anchor-free queries fall back to the dense default
+untouched. Implemented as a shared `make_search` factory
+(`src/agentic_rag/search_modes.py`) that also de-duplicates the three
+formerly copy-pasted search closures. Grep and anchor logic are covered by
+network-free unit tests (`tests/test_search_modes.py`).
+
+**The contradiction guard fires when the fault is injected — on a sample too
+small to call it validated.** Across every natural run, `conflicts detected = 0`
+(mostly-successful 2-hop questions never extract the same figure twice), so the
+guard was exercised by injecting the failure it exists to catch: a corrupted
+twin extraction per question (value ×0.33, variant entity/period spellings so
+the grouping normalizers are genuinely exercised, real chunk ids). Result —
+detection **5/5**; the corrupted figure reached the final answer **3/5 with the
+guard off vs 1/5 with it on** (and that one was an abstention quoting the
+conflict, not an assertion) — `eval/run_conflict_injection.py`, REPORT §5.3.
+
+Read that with the denominators visible, because they are small and they are
+not equal:
+
+- **n = 5 questions, and 4 of them ask about R&D FY2024** in different shapes
+  (ratio / delta / compare / trend). They are variants of one underlying fact,
+  not five independent trials.
+- **`grade` returns "ungradeable" too**, and the arms produce different amounts
+  of it — 2 ungradeable with the guard on, 3 with it off. So the "correct
+  answers 0 → 2" figure previously quoted here compares 3 gradeable answers
+  against 2. It is a direction, not an effect size, and it is no longer quoted
+  as one.
+- **Detection 5/5 vs 0/5 is definitional on the OFF arm**: the detector is
+  disabled there, so its zero is a tautology rather than a measurement. The
+  informative half is the ON arm's 5/5 and the contamination gap.
+
+The arms also run the agent twice rather than replaying one trajectory, so
+extraction is re-sampled per arm and the injected twin is not guaranteed to
+attach at the same seam. What this experiment establishes is that the guard
+*fires and reduces contamination when the fault is present*; a controlled
+effect size needs a paired design over substantially more distinct facts.
+
+The audit had also found and fixed two reasons conflicts could silently fail to
+form: first-year-only period keys and non-numeric values that always
+"conflicted".
 
 ```bash
 uv run python eval/build_multihop_eval.py
@@ -232,6 +265,8 @@ qwen/qwen3-next-80b-a3b-instruct  ->  HTTP 410 "end of life on 2026-07-27"
 qwen/qwen3.5-397b-a17b            ->  HTTP 410 "end of life on 2026-07-27"
 moonshotai/kimi-k2.6              ->  404 for this account
 google/gemma-4-31b-it             ->  timeout at 45s
+deepseek-ai/deepseek-v4-flash     ->  HTTP 410 "end of life on 2026-08-07"
+                                      (chains updated to -0731 same week)
 ```
 
 No deprecation warning; the model simply began returning 410. This is why every
@@ -315,15 +350,25 @@ scripts/
 
 - The conflict resolver is itself an LLM call. It fails to "cannot determine"
   rather than to a wrong number, which is the right failure direction, but it is
-  not a guarantee.
+  not a guarantee. It is now **checked rather than trusted**: a resolved value
+  is only rendered to the synthesizer as "verified" if the figure actually
+  occurs in the passage the verifier cited, at any of the scales filings use
+  (`value_in_passage`). Previously the resolver could return a figure appearing
+  in no passage at all and the synthesizer would receive it labelled verified —
+  carrying more authority than the two conflicting extractions it replaced.
+  A verifier that cites a passage index outside the set it was shown now leaves
+  the conflict unresolved instead of silently borrowing the first passage's
+  citation.
 - Contradiction detection only covers **numeric** values — non-numeric claims
   ("management cited supply constraints") are grouped but not compared.
 - Bounded at `max_rounds=2`. A self-correcting loop without a budget is a way to
   spend money slowly.
-- **The contradiction check is unvalidated end-to-end.** Zero conflicts fired
-  across every eval run, so the planned ON/OFF ablation is uninformative. Its
-  unit tests prove it detects the failure it was written for; the eval has not
-  yet produced a case for it to detect.
+- **The contradiction check has no natural end-to-end validation.** Zero
+  conflicts fired across every eval run, so the ON/OFF ablation on natural data
+  is uninformative. Fault injection shows the guard fires and reduces
+  contamination when the fault is present, but over 5 questions covering ~2
+  distinct facts with unequal gradeable denominators per arm — direction, not
+  effect size.
 - **Answer accuracy is an upper bound**, not a measurement — null-model hit rate
   0.60 against accuracy 0.80 on 5 questions. Grading needs to target the stated
   conclusion rather than any number in the answer.
