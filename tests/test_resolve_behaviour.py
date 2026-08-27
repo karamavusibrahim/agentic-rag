@@ -81,3 +81,71 @@ def test_render_only_says_verified_when_it_resolved():
     ungrounded = run({"correct_value": "$4,239 million", "passage_number": 1})
     assert "verified" not in ungrounded.render()
     assert "UNRESOLVED" in ungrounded.render()
+
+
+# ---------------------------------------------------------------------------
+# The extractor, driven through MultiHopAgent.extract rather than its helpers.
+# Reverting any of the three extractor guards left the earlier tests green,
+# because none of them called this method.
+# ---------------------------------------------------------------------------
+
+from agentic_rag.agent.loop import MultiHopAgent  # noqa: E402
+
+
+def extract(reply: dict, text: str = PASSAGE):
+    hits = [Hit("c1", text)]
+    agent = MultiHopAgent(lambda q, k: hits)
+    with patch("agentic_rag.agent.loop.chat_json_chain",
+               return_value=(reply, "model")):
+        return agent.extract("what was R&D expense")
+
+
+def test_a_normal_extraction_succeeds():
+    e = extract({"found": True, "value": "$12,914 million", "passage_number": 1})
+    assert e.found and e.value == "$12,914 million" and e.chunk_id == "c1"
+
+
+def test_the_string_false_is_not_a_successful_extraction():
+    # Hosted models return "found": "false" as a string; a truthiness test read
+    # that refusal as a positive extraction and rendered the value "False".
+    e = extract({"found": "false", "value": "$12,914 million",
+                 "passage_number": 1})
+    assert not e.found
+
+
+def test_a_boolean_passage_number_is_rejected():
+    e = extract({"found": True, "value": "$12,914 million",
+                 "passage_number": True})
+    assert not e.found, "isinstance(True, int) let a boolean select hits[0]"
+
+
+def test_an_out_of_range_passage_number_is_rejected():
+    e = extract({"found": True, "value": "$12,914 million", "passage_number": 9})
+    assert not e.found
+
+
+def test_a_numeric_zero_is_a_real_value():
+    # `str(value or "")` mapped 0 to empty and discarded the extraction.
+    e = extract({"found": True, "value": 0, "passage_number": 1})
+    assert e.found and e.value == "0"
+
+
+def test_an_empty_value_is_not_an_extraction():
+    e = extract({"found": True, "value": "  ", "passage_number": 1})
+    assert not e.found
+
+
+def test_grounding_uses_only_the_text_the_verifier_was_shown():
+    """A value past the truncation point was never seen by the verifier.
+
+    `resolve` shows the model `hit.text[:VERIFY_CHARS]` but used to validate
+    against the whole passage, so a figure buried beyond the cut could be
+    returned and then "confirmed" by text the model never read.
+    """
+    from agentic_rag.agent.contradictions import VERIFY_CHARS
+
+    buried = "$100 million " + ("filler " * 400) + " $999 million"
+    assert len(buried) > VERIFY_CHARS
+    c = run({"correct_value": "$999 million", "passage_number": 1},
+            hits=[Hit("c1", buried)])
+    assert c.unresolved, "a value beyond the shown window was accepted"

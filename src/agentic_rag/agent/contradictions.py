@@ -47,6 +47,17 @@ _NUM_RE = re.compile(
 # round inconsistently between statements (60,922 vs 60,925 for the same line).
 REL_TOLERANCE = 0.01
 
+# How much of a passage the verifier is shown, and therefore how much of it may
+# be used to ground the answer. The two must be the same number.
+VERIFY_CHARS = 1200
+
+# Implicit scaling -- reading a bare "12,914" as $12,914 million -- is only
+# justified when the passage says it reports in thousands or millions. Applying
+# it unconditionally let any bare number stand in for a scaled figure, so
+# "the company had 100 employees" grounded a claim of "$100 million".
+_SCALE_CAPTION = re.compile(
+    r"\(?\bin\s+(thousand|million|billion)s?\b", re.I)
+
 
 def parse_magnitude(text: str | None) -> float | None:
     """Best-effort numeric magnitude from an extracted value string.
@@ -117,6 +128,9 @@ def value_in_passage(value: str, passage: str,
         needle = value.strip().lower()
         return bool(needle) and needle in passage.lower()
 
+    cap = _SCALE_CAPTION.search(passage)
+    caption = _SCALES.get(cap.group(1).lower()) if cap else None
+
     for m in _NUM_RE.finditer(passage):
         raw, scale_word = m.group(1), (m.group(2) or "").lower()
         try:
@@ -142,9 +156,10 @@ def value_in_passage(value: str, passage: str,
         # plausible-looking financial figure out of nothing.
         if _YEARISH.match(raw.replace(",", "")):
             continue
-        for implied in (1e3, 1e6, 1e9):
-            if values_agree(target, found * implied, tolerance=tolerance):
-                return True
+        if caption is None:
+            continue
+        if values_agree(target, found * caption, tolerance=tolerance):
+            return True
     return False
 
 
@@ -336,7 +351,8 @@ def resolve(
         return conflict
 
     passages = "\n\n".join(
-        f"[{i}] ({h.citation()})\n{h.text[:1200]}" for i, h in enumerate(hits, 1)
+        f"[{i}] ({h.citation()})\n{h.text[:VERIFY_CHARS]}"
+        for i, h in enumerate(hits, 1)
     )
     candidates = "\n".join(
         f"- {c.value} [{c.citation}]" for c in conflict.candidates if c.value
@@ -380,7 +396,11 @@ def resolve(
     # passage the verifier cited. Without this the resolver is free to return a
     # value that appears in no passage at all and have it enter synthesis
     # carrying more authority than the conflicting extractions it replaced.
-    if not value_in_passage(str(value), hit.text):
+    # Validate against exactly what the verifier was shown. Checking the full
+    # passage let a figure sitting past the truncation point count as grounded,
+    # so the model could return a value it never saw and have the check confirm
+    # it -- a coincidence dressed up as verification.
+    if not value_in_passage(str(value), hit.text[:VERIFY_CHARS]):
         conflict.reason = (
             f"verifier returned {value!r}, which does not appear in the passage "
             f"it cited ({hit.citation()})"

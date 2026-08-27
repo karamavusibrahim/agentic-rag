@@ -74,7 +74,8 @@ injections. The README states the direction rather than the effect size.
   in the README; fixing it means recording and replaying trajectories.
 - **Detection 5/5 vs 0/5** is honest for the ON arm and definitional for the
   OFF arm, where the detector is disabled. Labelled as such rather than removed.
-- The existing 69 tests pass unchanged; 5 were added for the grounding fixes.
+- Test counts are stated in the third-pass section below; earlier figures in
+  this file were wrong.
 
 ## Not fixed — needs a run this audit did not make
 
@@ -146,9 +147,65 @@ Recorded rather than quietly dropped:
   least five distinct atomic figures. They share one AAPL R&D value; they are
   correlated, not duplicates.
 - **`main` had 59 tests, not 69.** The earlier count credited this branch's own
-  additions to the baseline.
+  additions to the baseline. The suite is now **87**: 59 inherited plus 28
+  added across this branch.
 - **The null-model margin is computable offline** (12/30 = 0.40 over the merged
-  n=30 traces). The claim that it needed an API rerun was wrong.
+  n=30 traces). The claim earlier in this file that it needed an API rerun is
+  withdrawn.
 - **Ordinary extraction is still ungrounded.** Only conflict *resolution* checks
   its value against the cited passage. The far more common path does not, and
   that is the larger remaining hole.
+
+
+---
+
+## Third pass
+
+### A value the verifier never saw could still be "verified"
+
+`resolve` shows the model `hit.text[:1200]` and validated the answer against
+the **full** passage. A figure sitting past the truncation point could be
+returned and then confirmed by text the model never read — a coincidence
+dressed up as verification. The window is now one constant, `VERIFY_CHARS`,
+used for both, and a test buries `$999 million` past the cut and asserts the
+conflict stays unresolved.
+
+### Implicit scaling still let an employee count stand in for a revenue figure
+
+Reading a bare `12,914` as `$12,914 million` is only justified when the passage
+says it reports in thousands or millions. Applied unconditionally, `"the
+company had 100 employees"` grounded a claim of `$100 million` — the same shape
+as the bug this guard exists to stop. Implicit scaling now requires an explicit
+"in millions"/"in thousands" caption in the passage, and uses that caption's
+scale rather than trying all of them.
+
+### The extractor still had no test of its own
+
+Reverting the extractor's truthiness, boolean-index or zero handling left every
+test green, because all of them called helpers. `test_resolve_behaviour.py` now
+drives `MultiHopAgent.extract` through a stubbed model for all six cases.
+
+Suite: **87 tests** (59 inherited from `main`, 28 added on this branch).
+
+## Still open after three passes
+
+- **Ordinary extraction is ungrounded.** `resolve` checks its value against the
+  cited passage; `extract` does not, and it runs far more often. A model can
+  return `$999 million` against a passage reading `$100 million` and have it
+  cited. This is the largest remaining hole and needs the same treatment.
+- **The injection arms are not paired** and the committed artifact predates the
+  summary fields this branch added, so `conflict_injection.json` does not carry
+  `n_gradeable` / `ungradeable` / `distinct_facts`. Regenerating needs API access.
+- `distinct_facts` counts QID tokens, giving 3 where the five questions draw on
+  seven atomic figures. README still says "~2 facts" and REPORT still says the
+  OFF arm had 2 ungradeable rows where the artifact shows 3.
+- README publishes a null-hit rate of ~0.2–0.3; recomputing over the same 30
+  traces gives 12/30 = 0.40.
+- README and REPORT still carry the superseded 5-question framing beside the
+  n=30 headline.
+- `relgrep` truncates to 100 chunks before reranking and does not fall back,
+  so the only answer-bearing chunk can be discarded permanently.
+- `Conflict.render()` omits `resolved_chunk_id`, so the synthesizer gets a
+  "verified" figure with no source to cite.
+- Compare-question grading uses mention order, so "Compared with MSFT, AAPL
+  reported higher net income" grades wrong when the gold answer is AAPL.
