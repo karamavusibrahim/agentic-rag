@@ -393,7 +393,15 @@ class MultiHopAgent:
         # An extraction with no value is not an extraction. Letting it through
         # as found=True puts "None" in front of the synthesizer with a real
         # citation attached to it.
-        value = str(data.get("value") or "").strip() or None
+        # `data.get("value") or ""` mapped a legitimate numeric zero to the
+        # empty string and threw the extraction away. Zero is a real answer:
+        # "restructuring charges were $0 this quarter". Only None and blank
+        # strings are missing values. Booleans are never values.
+        raw_value = data.get("value")
+        if isinstance(raw_value, bool) or raw_value is None:
+            value = None
+        else:
+            value = str(raw_value).strip() or None
         if value is None:
             return Evidence(sub_question, False, None, None, None, None,
                             entity=ent, metric=met, period=per)
@@ -401,8 +409,10 @@ class MultiHopAgent:
         # Same reasoning as contradictions.resolve: if the model did not cite a
         # passage we actually showed it, we do not know where the figure came
         # from, so we must not manufacture a citation for it.
+        # Same boolean hole as contradictions.resolve: `True` is an int.
         n = data.get("passage_number")
-        if not (isinstance(n, int) and 1 <= n <= len(hits)):
+        if not (isinstance(n, int) and not isinstance(n, bool)
+                and 1 <= n <= len(hits)):
             return Evidence(sub_question, False, None, None, None, None,
                             entity=ent, metric=met, period=per)
         hit = hits[n - 1]

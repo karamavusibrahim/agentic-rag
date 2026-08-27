@@ -80,15 +80,34 @@ def values_agree(a: float | None, b: float | None,
     return scale > 0 and abs(a - b) / scale <= tolerance
 
 
+_YEARISH = re.compile(r"^(19|20)\d{2}$")
+
+
 def value_in_passage(value: str, passage: str,
                      *, tolerance: float = REL_TOLERANCE) -> bool:
     """Is the resolved figure actually present in the passage that was cited?
 
-    Filings and extractions disagree about presentation, not magnitude: the
+    Filings and extractions disagree about presentation, not magnitude: a
     passage prints "12,914" inside a table captioned "in millions" while the
-    extractor reports "$12,914 million". So compare magnitudes rather than
-    strings, and allow the passage's number to be the same figure written at a
-    thousands/millions/billions scale.
+    extractor reports "$12,914 million". So a bare number in the passage may
+    legitimately stand for a scaled figure, and that has to be allowed.
+
+    Allowing it carelessly is how the first version of this check passed three
+    hallucinations:
+
+    - ``value_in_passage("$0", ...)`` searched for the character "0" and
+      matched any passage containing one.
+    - A passage saying "$12.914 billion" matched a claimed "$12.914 trillion",
+      because the passage's already-scaled value was multiplied again.
+    - "FY2024" matched a claimed "$2.024 million": 2024 x 1e3.
+
+    So implicit scaling is applied only where it is actually plausible:
+    to a passage token carrying **no** scale word of its own, and never to a
+    bare four-digit year. Those are heuristics, and they are the reason this
+    function reports *grounding*, not correctness -- it can still be fooled by
+    a passage that happens to contain the claimed digits in an unrelated row.
+    Its job is to stop a figure that appears nowhere at all from being labelled
+    "verified".
 
     A non-numeric value (e.g. "the Americas segment") cannot be checked this
     way, so fall back to a case-insensitive substring test.
@@ -97,14 +116,34 @@ def value_in_passage(value: str, passage: str,
     if target is None:
         needle = value.strip().lower()
         return bool(needle) and needle in passage.lower()
-    if target == 0:
-        return "0" in passage
+
     for m in _NUM_RE.finditer(passage):
-        found = parse_magnitude(m.group(0))
-        if found is None:
+        raw, scale_word = m.group(1), (m.group(2) or "").lower()
+        try:
+            found = float(raw.replace(",", ""))
+        except ValueError:
             continue
-        for scale in (1.0, 1e3, 1e6, 1e9):
-            if values_agree(target, found * scale, tolerance=tolerance):
+        if "(" in m.group(0) and ")" in m.group(0):
+            found = -abs(found)
+
+        if scale_word:
+            # The passage said what it means. Take it at its word and do not
+            # invent a further multiplier.
+            if values_agree(target, found * _SCALES.get(scale_word, 1.0),
+                            tolerance=tolerance):
+                return True
+            continue
+
+        if values_agree(target, found, tolerance=tolerance):
+            return True
+
+        # A bare token may be printed under an "in thousands/millions" caption.
+        # A bare year is not: it is a date, and scaling it manufactures a
+        # plausible-looking financial figure out of nothing.
+        if _YEARISH.match(raw.replace(",", "")):
+            continue
+        for implied in (1e3, 1e6, 1e9):
+            if values_agree(target, found * implied, tolerance=tolerance):
                 return True
     return False
 
@@ -324,8 +363,12 @@ def resolve(
     # previous `else hits[0]` silently attached the first passage's citation to
     # a value the model may have read somewhere else -- or invented -- which is
     # exactly the failure the guard exists to prevent.
+    # `isinstance(True, int)` is True in Python, so a model answering
+    # `"passage_number": true` sailed through the range check as passage 1 --
+    # reintroducing exactly the silent hits[0] fallback this guard replaced.
     n = data.get("passage_number")
-    if not (isinstance(n, int) and 1 <= n <= len(hits)):
+    if not (isinstance(n, int) and not isinstance(n, bool)
+            and 1 <= n <= len(hits)):
         conflict.reason = (
             f"verifier did not cite a passage it was shown (passage_number={n!r})"
         )

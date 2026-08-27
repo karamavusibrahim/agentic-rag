@@ -82,3 +82,73 @@ injections. The README states the direction rather than the effect size.
   traces. Re-grading `eval/results/traces_n30_merged.json` offline gives
   26 correct / 2 wrong / 2 abstain. Confirming or retracting the margin needs
   the null-model arm re-run, which is an API-bound job.
+
+
+---
+
+## Second pass — corrections to this audit
+
+The fixes above were reviewed independently against `main`. That review found
+the central guard was itself exploitable, and that the tests could not have
+caught it. Both are fixed here.
+
+### `value_in_passage` accepted three classes of hallucination
+
+The first version special-cased zero by searching for the character `"0"`, and
+multiplied every passage number by 1e3/1e6/1e9 to guess an implicit
+"in millions" caption. All three of these returned **True**:
+
+```python
+value_in_passage("$0", "Fiscal 2024 revenue was $100 million")
+value_in_passage("$12.914 trillion", "Revenue was $12.914 billion")
+value_in_passage("$2.024 million", "FY2024 revenue")
+```
+
+The last is the clearest: a fiscal *year* scaled by 1e3 becomes a plausible
+dollar figure. A guard written to stop a hallucinated number from being
+labelled "verified" would have verified one.
+
+Now: implicit scaling applies only to a passage token carrying **no** scale word
+of its own (so "billion" is never re-scaled into "trillion"), never to a bare
+four-digit year, and zero is matched as a parsed numeric token rather than a
+character. A genuine `$0` in a passage still grounds a `$0` claim.
+
+### `passage_number: true` selected passage 1
+
+`isinstance(True, int)` is `True` in Python, so a boolean passed the range check
+in both `resolve()` and the extractor — restoring the silent `hits[0]` fallback
+the guard was written to remove. Both now reject booleans explicitly.
+
+### A legitimate `value: 0` was thrown away
+
+`str(data.get("value") or "")` maps `0` to `""`, so an extraction reporting zero
+became not-found. Zero is a real answer. Only `None`, blank strings, and
+booleans are missing values now.
+
+### The tests could not have caught any of this
+
+All five original tests called `value_in_passage` directly. Reverting the actual
+`resolve()` and extractor changes left every one of them green — they tested a
+helper, not the path that runs. `tests/test_resolve_behaviour.py` now drives
+`resolve()` through a stubbed model, and **3 of its 6 tests fail if the fixes
+are reverted** (verified, not assumed).
+
+## Findings from that review left open
+
+Recorded rather than quietly dropped:
+
+- **The injection arms are worse than "not paired".** The two arms received
+  *different* corruptions ($10.35B ON vs $129.04B OFF on the ratio question),
+  because extraction is re-sampled per arm and the twin attaches to whichever
+  extraction returns first. Fixing it means recording and replaying
+  trajectories; the README states the direction only.
+- **"Four variants of one fact" was wrong.** The five questions draw on at
+  least five distinct atomic figures. They share one AAPL R&D value; they are
+  correlated, not duplicates.
+- **`main` had 59 tests, not 69.** The earlier count credited this branch's own
+  additions to the baseline.
+- **The null-model margin is computable offline** (12/30 = 0.40 over the merged
+  n=30 traces). The claim that it needed an API rerun was wrong.
+- **Ordinary extraction is still ungrounded.** Only conflict *resolution* checks
+  its value against the cited passage. The far more common path does not, and
+  that is the larger remaining hole.
