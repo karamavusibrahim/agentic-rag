@@ -84,7 +84,9 @@ README states the direction rather than the effect size.
 - The claimed null-model margin could not be reproduced from the committed
   traces. Re-grading `eval/results/traces_n30_merged.json` offline gives
   26 correct / 2 wrong / 2 abstain. Confirming or retracting the margin needs
-  the null-model arm re-run, which is an API-bound job.
+  the null-model arm re-run, which is an API-bound job. (Withdrawn in the
+  third-pass section: the null model is deterministic and offline — and the
+  comparable figure is 12/24 = 0.50, per the fourth pass.)
 
 
 ---
@@ -149,8 +151,8 @@ Recorded rather than quietly dropped:
   least five distinct atomic figures. They share one AAPL R&D value; they are
   correlated, not duplicates.
 - **`main` had 59 tests, not 69.** The earlier count credited this branch's own
-  additions to the baseline. The suite is now **87**: 59 inherited plus 28
-  added across this branch.
+  additions to the baseline. The suite has grown each pass; the current count is stated once, in the
+  fifth-pass section.
 - **The null-model margin is computable offline** (12/30 = 0.40 over the merged
   n=30 traces). The claim earlier in this file that it needed an API rerun is
   withdrawn.
@@ -187,7 +189,7 @@ Reverting the extractor's truthiness, boolean-index or zero handling left every
 test green, because all of them called helpers. `test_resolve_behaviour.py` now
 drives `MultiHopAgent.extract` through a stubbed model for all six cases.
 
-Suite: **87 tests** (59 inherited from `main`, 28 added on this branch).
+Suite at the third pass: 87 tests; see the fifth pass for the current count.
 
 ## Still open after three passes
 
@@ -240,8 +242,12 @@ pre-fix grounder.
 changes (`git log --follow` places it at the initial commit), so its detection
 and contamination numbers describe the guard as it *was*. REPORT and README now
 say so, and the REPORT's OFF-arm ungradeable count (2) is corrected to the
-artifact's 3. Also aligned: the null control is the recomputed 12/30 = 0.40 at
-n=30, not ~0.2–0.3, narrowing the claimed margin (0.83 vs 0.40); the
+artifact's 3. Also aligned: the null control is recomputed from the committed traces — and
+the honest denominator matters. All twelve null hits fall on answerable
+questions (an abstaining control emits no numbers to collide), so on the same
+24 questions the 0.83 accuracy uses, the null is **12/24 = 0.50**, not the
+12/30 = 0.40 that mixing in the controls suggests. The margin is 0.83 vs 0.50 —
+real but modest; the
 five-question 0.60-vs-0.80 framing is marked superseded; and "one underlying
 fact" is now "seven atomic figures, four questions shaped over the same R&D
 pair".
@@ -254,3 +260,47 @@ pair".
 - `distinct_facts` still counts QID tokens (3) rather than atomic figures (7).
 - `relgrep` still truncates at 100 chunks without fallback; `Conflict.render()`
   still omits the resolved citation; compare-grading still uses mention order.
+
+
+---
+
+## Fifth pass
+
+Findings from the fourth-pass review, plus two the review and this audit found
+independently and one only this audit found.
+
+### Caption scope is now the sentence, not the passage
+
+Applying every declared caption to every bare number let Table A's employee
+count be scaled by Table B's caption into a three-billion-dollar revenue
+figure. A caption now grounds only the numbers in its own sentence (". "
+boundaries — decimals never carry a space after the point), which also keeps a
+trailing "(in millions)." attached to its own numbers.
+
+### The year guard is context-based, not shape-based
+
+Both directions were wrong. "2024." at a sentence end slipped past the guard
+(_NUM_RE keeps the dot, the year pattern did not), so a date could still be
+scaled into a figure — found independently by this audit and the review. And a
+bare "2024" under an explicit caption was rejected even when it was a real
+figure ("Revenue (in millions): 2024"). Now: a four-digit token preceded by
+fiscal/FY/calendar/year context is a date, always; without that context it is
+a number, eligible for its sentence's caption. Both cases are pinned.
+
+### The published null control mixed denominators — found here first
+
+All twelve null hits fall on answerable questions, because an abstaining
+control emits no numbers to collide. On the same 24 questions the 0.83
+accuracy uses, the null is **12/24 = 0.50**, not the 12/30 = 0.40 this branch
+briefly published (a figure the review had also computed over the mixed
+denominator). 0.83 vs 0.50 is the honest margin — real, not comfortable — and
+the null is this high because gold values collide across the question set.
+REPORT's remaining ~0.2–0.3 mentions and its 5+2 framing are synced to n=30.
+
+### Remaining wording aligned
+
+"Reduces contamination" is now "fired on every injection and the corrupted
+figure reached fewer answers with it on, in arms that were not given identical
+corruptions" — an observation, not an identified effect. The stale
+one-fact/API-rerun passages earlier in this file now carry their corrections
+inline. Test count at this commit: **95** (59 inherited from `main`).

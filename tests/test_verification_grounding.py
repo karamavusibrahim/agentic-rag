@@ -81,14 +81,38 @@ class TestHallucinationShapes:
         assert value_in_passage("$100 million",
                                 "(in millions) Total revenue 100")
 
+    def test_a_year_ending_a_sentence_is_still_a_year(self):
+        # _NUM_RE captures "2024." from "fiscal 2024. Revenue...", and an
+        # untrimmed token slipped past the year guard -- so the guard failed on
+        # exactly the years that end a sentence, which is where filing prose
+        # puts them.
+        assert not value_in_passage("$2.024 billion",
+                                    "In fiscal 2024. Revenue grew (in millions).")
+
     def test_a_comma_formatted_number_is_not_a_year(self):
         # "2,024" is a figure that happens to fall in 1900-2099; stripping the
         # comma before the year test rejected it under an explicit caption.
         assert value_in_passage("$2.024 billion",
                                 "Revenue (in millions): 2,024")
 
-    def test_every_declared_caption_applies(self):
+    def test_a_caption_reaches_its_own_sentence_only(self):
         # A chunk can caption one table in thousands and the next in millions.
+        # Each caption grounds the numbers in its sentence...
         assert value_in_passage(
             "$2 billion",
             "Table A (in thousands): 1. Table B (in millions): Revenue 2,000")
+        # ...and must not reach across the boundary: Table A's employee count
+        # scaled by Table B's caption is not three billion dollars of revenue.
+        assert not value_in_passage(
+            "$3 billion",
+            "Table A (in thousands): Employees 3,000. "
+            "Table B (in millions): Revenue 1")
+        # A trailing caption still covers the numbers of its own sentence.
+        assert value_in_passage("$12,914 million",
+                                "R&D was 12,914 compared to 8,701 (in millions).")
+
+    def test_a_year_shape_without_fiscal_context_is_a_figure(self):
+        # "Revenue (in millions): 2024" is $2.024 billion. Rejecting every
+        # 1900-2099 token threw away real values; only fiscal context makes a
+        # four-digit token a date.
+        assert value_in_passage("$2.024 billion", "Revenue (in millions): 2024")

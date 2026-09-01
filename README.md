@@ -178,9 +178,14 @@ year from the period `end` date instead:
 
 **At n=30 (after the audit's grader rewrite): answerable accuracy 20/24 =
 0.83, Wilson95 [0.64, 0.93]; unanswerable controls 6/6 abstained.** Re-grading
-the committed traces offline puts the null control at **12/30 = 0.40** — higher
-than the ~0.2–0.3 previously quoted here, so the margin over the null is
-narrower than first written, though still present (0.83 vs 0.40). Two things had to be fixed to
+the committed traces offline puts the null control at **12/24 = 0.50** on the
+same denominator the accuracy uses — all twelve null hits fall on answerable
+questions, since an abstaining control emits no numbers to collide. (Quoting it
+as 12/30 = 0.40 mixes denominators and flatters the margin.) That is well above
+the ~0.2–0.3 previously written here: the margin over the null is 0.83 vs 0.50,
+real but modest, and the null is this high because gold values collide across
+questions — a property of the question set, worth fixing before the accuracy
+number is leaned on. Two things had to be fixed to
 get an honest number, and both are the interesting part:
 
 - *The grader could be satisfied by a citation.* `_NUM` read "10" out of
@@ -246,9 +251,11 @@ not equal:
 
 The arms also run the agent twice rather than replaying one trajectory, so
 extraction is re-sampled per arm and the injected twin is not guaranteed to
-attach at the same seam. What this experiment establishes is that the guard
-*fires and reduces contamination when the fault is present*; a controlled
-effect size needs a paired design over substantially more distinct facts.
+attach at the same seam. What this run recorded is that the guard
+*fired on every injection and the corrupted figure reached fewer answers with
+it on* — in two arms that were not given identical corruptions, so even that is
+an observation, not an identified effect; a controlled effect size needs
+recorded trajectories replayed with the guard toggled.
 
 The audit had also found and fixed two reasons conflicts could silently fail to
 form: first-year-only period keys and non-numeric values that always
@@ -375,8 +382,9 @@ scripts/
   not effect size. The saved run also predates this branch's resolver changes,
   so it describes the guard as it was, not as it is.
 - **Answer accuracy is an upper bound**, not a measurement — at the n=30
-  headline, the recomputed null-model hit rate is 0.40 against accuracy 0.83
-  (the earlier 5-question framing, 0.60 vs 0.80, is superseded). Grading needs to target the stated
+  headline, the recomputed null-model hit rate is 0.50 over the same 24
+  answerable questions the 0.83 accuracy is computed on (the earlier
+  5-question framing, 0.60 vs 0.80, is superseded). Grading needs to target the stated
   conclusion rather than any number in the answer.
 - Extraction now runs in parallel across sub-questions (bounded at 4 workers),
   which matters because observed per-call latency on this API ranges from 4s to

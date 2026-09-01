@@ -93,6 +93,9 @@ def values_agree(a: float | None, b: float | None,
 
 _YEARISH = re.compile(r"^(19|20)\d{2}$")
 
+# Words that mark a following four-digit token as a date rather than a figure.
+_FISCAL_CTX = re.compile(r"(?:fiscal|fy|calendar|year)[\s:]*$", re.I)
+
 
 def value_in_passage(value: str, passage: str,
                      *, tolerance: float = REL_TOLERANCE) -> bool:
@@ -128,11 +131,20 @@ def value_in_passage(value: str, passage: str,
         needle = value.strip().lower()
         return bool(needle) and needle in passage.lower()
 
-    # Every scale the passage declares, not just the first: a chunk can carry
-    # "(in thousands)" for one table and "(in millions)" for the next, and
-    # using only the first caption rejected values grounded by the second.
-    captions = {_SCALES[m.group(1).lower()]
-                for m in _SCALE_CAPTION.finditer(passage)}
+    # A caption's scope is its sentence, not the whole passage. One chunk can
+    # caption one table "(in thousands)" and the next "(in millions)", and
+    # applying every caption to every number let Table A's employee count be
+    # scaled by Table B's caption into a revenue figure. Sentence boundaries
+    # (". " -- decimals never have a space after the point) keep a trailing
+    # caption like "... 12,914 compared to 8,701 (in millions)." attached to
+    # its own numbers without leaking across tables.
+    def sentence_scales(pos: int) -> list[float]:
+        lo = passage.rfind(". ", 0, pos)
+        lo = 0 if lo == -1 else lo + 2
+        hi = passage.find(". ", pos)
+        hi = len(passage) if hi == -1 else hi + 1
+        return [_SCALES[m.group(1).lower()]
+                for m in _SCALE_CAPTION.finditer(passage, lo, hi)]
 
     for m in _NUM_RE.finditer(passage):
         raw, scale_word = m.group(1), (m.group(2) or "").lower()
@@ -151,18 +163,21 @@ def value_in_passage(value: str, passage: str,
                 return True
             continue
 
+        # A four-digit token in explicit fiscal context is a date, full stop:
+        # "fiscal 2024" and "FY 2024" never mean $2,024 whatever caption the
+        # sentence carries, and scaling them manufactured plausible-looking
+        # figures out of dates. Outside that context "year" is only a guess --
+        # "Revenue (in millions): 2024" is a real figure -- so a year-shaped
+        # token without fiscal context stays eligible for caption scaling.
+        # (_NUM_RE captures sentence-final years as "2024.", hence the strip.)
+        bare = raw.rstrip(".")
+        if _YEARISH.match(bare) and \
+                _FISCAL_CTX.search(passage[max(0, m.start(1) - 16):m.start(1)]):
+            continue
+
         if values_agree(target, found, tolerance=tolerance):
             return True
-
-        # A bare token may be printed under an "in thousands/millions" caption.
-        # A bare year is not: it is a date, and scaling it manufactures a
-        # plausible-looking financial figure out of nothing. But "year" means
-        # the token as printed -- "2,024" with its thousands separator is a
-        # number that happens to fall in 1900-2099, and stripping the comma
-        # before the test rejected it under an explicit caption.
-        if _YEARISH.match(raw):
-            continue
-        for scale in captions:
+        for scale in sentence_scales(m.start()):
             if values_agree(target, found * scale, tolerance=tolerance):
                 return True
     return False

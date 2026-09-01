@@ -405,8 +405,13 @@ conflicts on natural data: still 0
 The two genuine wrongs: one 4-hop trend question, and one comparison where
 the agent failed to retrieve AAPL's operating income and said a comparison
 could not be made (arguably an abstention the grader's phrasing list does not
-recognise). Accuracy at 0.83 now sits far above the null control (~0.2–0.3),
-and every control abstained — the period guard held at 6/6 rather than the
+recognise). Accuracy at 0.83 sits above the null control, but by less than
+first written here: recomputed offline on the same 24 answerable questions the
+accuracy uses, the null is **12/24 = 0.50** — all null hits fall on answerable
+questions, since an abstaining control emits no numbers to collide, so the
+earlier ~0.2–0.3 (and any 12/30 = 0.40 phrasing) understates it. 0.83 vs 0.50
+is a real margin, not a comfortable one; the null is this high because gold
+values collide across questions. Every control abstained — the period guard held at 6/6 rather than the
 2/2 previously reported.
 
 The episode is the project's thesis in miniature: the dramatic result was an
@@ -521,12 +526,15 @@ wall-clock deadline per item.
   ("management cited supply constraints") are grouped but not compared.
 - **Bounded at `max_rounds=2`.** A self-correcting loop without a budget is a way
   to spend money slowly.
-- **The eval is small.** 5 answerable + 2 control questions. The harness is the
-  durable artifact; the numbers are a first measurement, not a benchmark.
+- **The eval is small.** The headline is n=30 (24 answerable + 6 controls);
+  the original 5 answerable + 2 controls survives only as the grader-fix
+  story in §5.4. The harness is the durable artifact; the numbers are a first
+  measurement, not a benchmark.
 - **The primary metric improved but remains an upper bound.** The original
   null-model hit rate of 0.60 against accuracy 0.80 turned out to be mostly the
-  grader's own citation-digit bug (§5.4); under the fixed grader the null is
-  0.20. The remaining looseness: grading still accepts a matching figure
+  grader's own citation-digit bug (§5.4); under the fixed grader the null was
+  0.20 on those five questions, and is **0.50 over the n=30 headline's 24
+  answerable questions** — the honest comparison for the 0.83. The remaining looseness: grading still accepts a matching figure
   anywhere in the answer rather than only in the headline sentence, and several
   golds sit within tolerance of each other (two NVDA deltas differ by 1.46%
   relative, inside the 2% window), so correct/wrong is not distinguishable for
