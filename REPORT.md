@@ -325,7 +325,13 @@ vs OFF:
 | correct | 2 | 0 |
 | wrong | 0 | 0 |
 | abstain | 1 | 2 |
-| ungradeable (compare echoes) | 2 | 2 |
+| ungradeable (compare echoes) | 2 | 3 |
+
+(The OFF arm's ungradeable count previously read 2 here; the committed artifact
+has 3, which is also why the arms' gradeable denominators differ — 3 vs 2.
+These numbers describe the run saved in `conflict_injection.json`, which
+predates this branch's resolver changes; the guard's behaviour under current
+code has not been re-measured, as the rerun is API-bound.)
 
 Three readings. First, **detection recall through the full production path is
 5/5** — grouping survived the variant spellings, which is precisely the seam

@@ -177,8 +177,10 @@ year from the period `end` date instead:
 | abstain | 0 | 1 |
 
 **At n=30 (after the audit's grader rewrite): answerable accuracy 20/24 =
-0.83, Wilson95 [0.64, 0.93]; unanswerable controls 6/6 abstained.** The null
-control sits at ~0.2–0.3, so the margin is real. Two things had to be fixed to
+0.83, Wilson95 [0.64, 0.93]; unanswerable controls 6/6 abstained.** Re-grading
+the committed traces offline puts the null control at **12/30 = 0.40** — higher
+than the ~0.2–0.3 previously quoted here, so the margin over the null is
+narrower than first written, though still present (0.83 vs 0.40). Two things had to be fixed to
 get an honest number, and both are the interesting part:
 
 - *The grader could be satisfied by a citation.* `_NUM` read "10" out of
@@ -230,8 +232,9 @@ Read that with the denominators visible, because they are small and they are
 not equal:
 
 - **n = 5 questions, and 4 of them ask about R&D FY2024** in different shapes
-  (ratio / delta / compare / trend). They are variants of one underlying fact,
-  not five independent trials.
+  (ratio / delta / compare / trend). Together the five questions draw on seven
+  atomic source figures, but four of them are shapes over the same R&D pair —
+  correlated questions, not five independent trials.
 - **`grade` returns "ungradeable" too**, and the arms produce different amounts
   of it — 2 ungradeable with the guard on, 3 with it off. So the "correct
   answers 0 → 2" figure previously quoted here compares 3 gradeable answers
@@ -366,11 +369,14 @@ scripts/
 - **The contradiction check has no natural end-to-end validation.** Zero
   conflicts fired across every eval run, so the ON/OFF ablation on natural data
   is uninformative. Fault injection shows the guard fires and reduces
-  contamination when the fault is present, but over 5 questions covering ~2
-  distinct facts with unequal gradeable denominators per arm — direction, not
-  effect size.
-- **Answer accuracy is an upper bound**, not a measurement — null-model hit rate
-  0.60 against accuracy 0.80 on 5 questions. Grading needs to target the stated
+  contamination when the fault is present, but over 5 correlated questions —
+  they draw on seven atomic source figures, four of them shapes over the same
+  R&D pair — with unequal gradeable denominators per arm (3 vs 2). Direction,
+  not effect size. The saved run also predates this branch's resolver changes,
+  so it describes the guard as it was, not as it is.
+- **Answer accuracy is an upper bound**, not a measurement — at the n=30
+  headline, the recomputed null-model hit rate is 0.40 against accuracy 0.83
+  (the earlier 5-question framing, 0.60 vs 0.80, is superseded). Grading needs to target the stated
   conclusion rather than any number in the answer.
 - Extraction now runs in parallel across sub-questions (bounded at 4 workers),
   which matters because observed per-call latency on this API ranges from 4s to

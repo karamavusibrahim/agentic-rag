@@ -60,9 +60,11 @@ independent trials; and `detection_rate` divided by `max(len(inj), 1)`, which
 reports `0.0` — indistinguishable from "the guard failed" — when nothing was
 actually injected.
 
-The summary now reports `n_gradeable`, `ungradeable`, `errors`, `detected`,
-`distinct_facts`, and `None` (not `0.0`) for a detection rate over zero
-injections. The README states the direction rather than the effect size.
+The summary *code* now reports `n_gradeable`, `ungradeable`, `errors`,
+`detected`, `distinct_facts`, and `None` (not `0.0`) for a detection rate over
+zero injections — but the committed `conflict_injection.json` predates these
+fields and a rerun is API-bound, so the artifact does not carry them. The
+README states the direction rather than the effect size.
 
 ## Examined and left alone
 
@@ -209,3 +211,46 @@ Suite: **87 tests** (59 inherited from `main`, 28 added on this branch).
   "verified" figure with no source to cite.
 - Compare-question grading uses mention order, so "Compared with MSFT, AAPL
   reported higher net income" grades wrong when the gold answer is AAPL.
+
+
+---
+
+## Fourth pass
+
+### The year guard was too broad, the caption guard too narrow
+
+`value_in_passage` stripped commas before its year test, so `"2,024"` — a
+figure with a thousands separator that happens to fall in 1900–2099 — was
+rejected as a year even under an explicit "(in millions)" caption. And only the
+*first* caption in a passage applied, so a chunk captioning one table in
+thousands and the next in millions rejected values grounded by the second.
+"Year" now means the token as printed, and every declared caption applies.
+
+### The three original hallucination shapes are pinned as tests
+
+The review substituted the pre-fix grounder in memory and every test stayed
+green. `TestHallucinationShapes` now covers all of them — the character-zero
+match, the rescaled explicit scale, the fiscal-year-as-dollar-figure — plus the
+caption-gated scaling and both fourth-pass cases. These fail against the
+pre-fix grounder.
+
+### The fault-injection numbers are labelled with their vintage
+
+`conflict_injection.json` was produced before any of this branch's resolver
+changes (`git log --follow` places it at the initial commit), so its detection
+and contamination numbers describe the guard as it *was*. REPORT and README now
+say so, and the REPORT's OFF-arm ungradeable count (2) is corrected to the
+artifact's 3. Also aligned: the null control is the recomputed 12/30 = 0.40 at
+n=30, not ~0.2–0.3, narrowing the claimed margin (0.83 vs 0.40); the
+five-question 0.60-vs-0.80 framing is marked superseded; and "one underlying
+fact" is now "seven atomic figures, four questions shaped over the same R&D
+pair".
+
+## Still open after four passes
+
+- **Ordinary extraction is still ungrounded** — the largest hole, unchanged.
+- The injection arms remain unpaired; re-measuring the guard under current
+  resolver semantics is API-bound.
+- `distinct_facts` still counts QID tokens (3) rather than atomic figures (7).
+- `relgrep` still truncates at 100 chunks without fallback; `Conflict.render()`
+  still omits the resolved citation; compare-grading still uses mention order.

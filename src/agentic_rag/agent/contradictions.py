@@ -128,8 +128,11 @@ def value_in_passage(value: str, passage: str,
         needle = value.strip().lower()
         return bool(needle) and needle in passage.lower()
 
-    cap = _SCALE_CAPTION.search(passage)
-    caption = _SCALES.get(cap.group(1).lower()) if cap else None
+    # Every scale the passage declares, not just the first: a chunk can carry
+    # "(in thousands)" for one table and "(in millions)" for the next, and
+    # using only the first caption rejected values grounded by the second.
+    captions = {_SCALES[m.group(1).lower()]
+                for m in _SCALE_CAPTION.finditer(passage)}
 
     for m in _NUM_RE.finditer(passage):
         raw, scale_word = m.group(1), (m.group(2) or "").lower()
@@ -153,13 +156,15 @@ def value_in_passage(value: str, passage: str,
 
         # A bare token may be printed under an "in thousands/millions" caption.
         # A bare year is not: it is a date, and scaling it manufactures a
-        # plausible-looking financial figure out of nothing.
-        if _YEARISH.match(raw.replace(",", "")):
+        # plausible-looking financial figure out of nothing. But "year" means
+        # the token as printed -- "2,024" with its thousands separator is a
+        # number that happens to fall in 1900-2099, and stripping the comma
+        # before the test rejected it under an explicit caption.
+        if _YEARISH.match(raw):
             continue
-        if caption is None:
-            continue
-        if values_agree(target, found * caption, tolerance=tolerance):
-            return True
+        for scale in captions:
+            if values_agree(target, found * scale, tolerance=tolerance):
+                return True
     return False
 
 

@@ -49,3 +49,46 @@ def test_non_numeric_values_fall_back_to_substring():
 
 def test_empty_value_is_never_grounded():
     assert not value_in_passage("", PASSAGE)
+
+
+class TestHallucinationShapes:
+    """The three shapes that got past the first grounding check, pinned.
+
+    An independent review substituted the pre-fix grounder in memory and every
+    test in this repo stayed green while all three of these returned True.
+    These fail against that version.
+    """
+
+    def test_zero_is_not_grounded_by_any_character_zero(self):
+        assert not value_in_passage("$0", "Fiscal 2024 revenue was $100 million")
+        assert value_in_passage("$0", "Net charges were $0 this year")
+
+    def test_an_explicit_scale_is_never_rescaled(self):
+        assert not value_in_passage("$12.914 trillion",
+                                    "Revenue was $12.914 billion")
+
+    def test_a_fiscal_year_is_not_a_dollar_figure(self):
+        assert not value_in_passage("$2.024 million", "FY2024 revenue")
+        assert not value_in_passage("$2.024 million",
+                                    "fiscal 2024 revenue (in millions)")
+
+    def test_implicit_scaling_requires_a_caption(self):
+        # "100 employees" must not ground "$100 million"; the same digits under
+        # an explicit caption must.
+        assert not value_in_passage(
+            "$100 million",
+            "Revenue was $200 million; the company had 100 employees.")
+        assert value_in_passage("$100 million",
+                                "(in millions) Total revenue 100")
+
+    def test_a_comma_formatted_number_is_not_a_year(self):
+        # "2,024" is a figure that happens to fall in 1900-2099; stripping the
+        # comma before the year test rejected it under an explicit caption.
+        assert value_in_passage("$2.024 billion",
+                                "Revenue (in millions): 2,024")
+
+    def test_every_declared_caption_applies(self):
+        # A chunk can caption one table in thousands and the next in millions.
+        assert value_in_passage(
+            "$2 billion",
+            "Table A (in thousands): 1. Table B (in millions): Revenue 2,000")
