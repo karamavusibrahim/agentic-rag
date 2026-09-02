@@ -96,8 +96,18 @@ _YEARISH = re.compile(r"^(19|20)\d{2}$")
 # Words that mark a following four-digit token as a date rather than a figure.
 # "fiscal 2024", "FY 2024", but also "for the fiscal year ended 2024" and
 # "year ending December 31, 2024" -- the keyword may sit a few tokens back.
+# The tokens in between must themselves be date-ish: an any-word gap turned
+# "For the year, revenue was 2024" into a date and threw away a real value.
+# A new table announced without its own scale caption ends the previous
+# caption's reach. Deliberately narrow: only an explicit heading form.
+_TABLE_HEADING = re.compile(r"\b(?:table|schedule|exhibit)\s+[\w.]+\s*:", re.I)
+
 _FISCAL_CTX = re.compile(
-    r"(?:fiscal|fy|calendar|year)\b[\w\s,]{0,24}$", re.I)
+    r"(?:fiscal|fy|calendar|year)\b"
+    r"(?:[\s,:]+(?:ended|ending|end|of|to|through|"
+    r"jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|"
+    r"sep\w*|oct\w*|nov\w*|dec\w*|\d{1,2}))*"
+    r"[\s,:]*$", re.I)
 
 
 def value_in_passage(value: str, passage: str,
@@ -159,9 +169,15 @@ def value_in_passage(value: str, passage: str,
         it in its own sentence).
         """
         scales: set[float] = set()
-        preceding = [sc for at, sc in caption_positions if at < pos]
+        preceding = [(at, sc) for at, sc in caption_positions if at < pos]
         if preceding:
-            scales.add(preceding[-1])
+            at, sc = preceding[-1]
+            # A caption governs what follows it -- until something that reads
+            # as a new table heading intervenes. "Table B: Employees 3,000"
+            # after Table A's caption is a new scope, and carrying the old
+            # scale into it manufactured a $3B figure from a headcount.
+            if not _TABLE_HEADING.search(passage, at, pos):
+                scales.add(sc)
         lo = passage.rfind(". ", 0, pos)
         lo = 0 if lo == -1 else lo + 2
         hi = passage.find(". ", pos)

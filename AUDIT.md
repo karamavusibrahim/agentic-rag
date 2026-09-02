@@ -329,3 +329,25 @@ inline. Test count at this commit: **95** (59 inherited from `main`).
 Still open, unchanged: ordinary extraction is ungrounded (the largest hole),
 relgrep truncation, `Conflict.render()` citation omission, mention-order
 compare grading, and the injection artifact's pre-resolver vintage.
+
+
+---
+
+## Seventh pass
+
+Both sixth-pass scope rules over-corrected, one each way:
+
+- The fiscal-context gap accepted *any* words between keyword and year, so
+  "For the year, revenue was 2024 (in millions)" became a date and a real
+  value was thrown away. Bridging tokens must now be date-ish — ended/ending,
+  months, day numbers — which also closes the punctuation escape
+  ("year ended: 2024").
+- The nearest-preceding caption carried forward indefinitely, so a new table
+  announced *without* a caption ("Table B: Employees 3,000") inherited Table
+  A's scale and a headcount became $3B. An explicit table heading now ends a
+  caption's reach. Narrow by design: only "Table/Schedule/Exhibit X:" forms.
+
+Both pinned. This is the third iteration of the scope rules; each round's
+false positive and false negative were adjacent, which is the nature of
+grounding numbers in prose — the guard documents itself as grounding, not
+correctness, and that framing is doing real work.

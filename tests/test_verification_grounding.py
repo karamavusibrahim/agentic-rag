@@ -134,3 +134,22 @@ class TestCaptionScope:
             "$2.024 billion", "For the fiscal year ended 2024 (in millions).")
         assert not value_in_passage(
             "$2.024 billion", "year ending December 31, 2024 (in millions)")
+
+
+class TestScopeBoundaries:
+    """The two boundary cases the sixth-pass review found, pinned."""
+
+    def test_an_ordinary_word_gap_is_not_fiscal_context(self):
+        # "For the year, revenue was 2024" is a value; only date-ish tokens
+        # (ended/ending/months/day numbers) may bridge keyword and year.
+        assert value_in_passage("$2.024 billion",
+                                "For the year, revenue was 2024 (in millions).")
+        assert not value_in_passage("$2.024 billion",
+                                    "For fiscal year ended: 2024 (in millions).")
+
+    def test_a_new_table_heading_ends_a_caption_reach(self):
+        # Table B without its own caption is a new scope; Table A's scale must
+        # not turn its headcount into billions.
+        assert not value_in_passage(
+            "$3 billion",
+            "Table A (in millions): Revenue 1. Table B: Employees 3,000.")
