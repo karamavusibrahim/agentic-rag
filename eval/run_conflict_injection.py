@@ -219,10 +219,15 @@ def main() -> int:
             "abstain": sum(1 for r in qs if r["verdict"] == "abstain"),
             "contaminated": sum(1 for r in qs if r["corrupted_value_in_answer"]),
             # The questions are generated per (concept, year) from a shared
-            # pool, so several of them ask about the same underlying figure in
-            # different shapes. That makes them correlated, not independent
-            # trials, and the count below is the honest sample size.
-            "distinct_facts": len({r["qid"].rsplit("-", 2)[-2:][0] for r in qs}),
+            # pool, so several ask about the same underlying figure in
+            # different shapes -- correlated, not independent trials. This
+            # counts distinct concept TOKENS in the qids, which is an upper
+            # bound on independence and an undercount of atomic source figures
+            # (the five committed questions draw on seven figures but carry
+            # three concept tokens). Named for what it is; the honest
+            # independence unit needs per-question source-figure metadata.
+            "distinct_concept_tokens": len({r["qid"].rsplit("-", 2)[-2:][0]
+                                            for r in qs}),
         }
         print(f"  summary: {arm['summary']}")
         results.append(arm)

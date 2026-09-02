@@ -94,7 +94,10 @@ def values_agree(a: float | None, b: float | None,
 _YEARISH = re.compile(r"^(19|20)\d{2}$")
 
 # Words that mark a following four-digit token as a date rather than a figure.
-_FISCAL_CTX = re.compile(r"(?:fiscal|fy|calendar|year)[\s:]*$", re.I)
+# "fiscal 2024", "FY 2024", but also "for the fiscal year ended 2024" and
+# "year ending December 31, 2024" -- the keyword may sit a few tokens back.
+_FISCAL_CTX = re.compile(
+    r"(?:fiscal|fy|calendar|year)\b[\w\s,]{0,24}$", re.I)
 
 
 def value_in_passage(value: str, passage: str,
@@ -138,13 +141,33 @@ def value_in_passage(value: str, passage: str,
     # (". " -- decimals never have a space after the point) keep a trailing
     # caption like "... 12,914 compared to 8,701 (in millions)." attached to
     # its own numbers without leaking across tables.
-    def sentence_scales(pos: int) -> list[float]:
+    caption_positions = [(m.start(), _SCALES[m.group(1).lower()])
+                         for m in _SCALE_CAPTION.finditer(passage)]
+
+    def applicable_scales(pos: int) -> set[float]:
+        """The caption(s) that plausibly govern the number at `pos`.
+
+        Two patterns coexist in filing text and each broke a previous version
+        of this function. "Figures are in millions. Revenue was 2,024." puts
+        the caption in an earlier sentence, so sentence-only scope missed it;
+        "Table A (in thousands): ... Table B (in millions): ..." puts a second
+        caption between an earlier caption and later numbers, so passage-wide
+        scope let Table B's caption reach Table A's numbers. The union that
+        respects both: the nearest caption *before* the number (a caption
+        governs what follows it, until superseded), plus any caption in the
+        same sentence (a trailing "(in millions)." governs the numbers before
+        it in its own sentence).
+        """
+        scales: set[float] = set()
+        preceding = [sc for at, sc in caption_positions if at < pos]
+        if preceding:
+            scales.add(preceding[-1])
         lo = passage.rfind(". ", 0, pos)
         lo = 0 if lo == -1 else lo + 2
         hi = passage.find(". ", pos)
         hi = len(passage) if hi == -1 else hi + 1
-        return [_SCALES[m.group(1).lower()]
-                for m in _SCALE_CAPTION.finditer(passage, lo, hi)]
+        scales.update(sc for at, sc in caption_positions if lo <= at < hi)
+        return scales
 
     for m in _NUM_RE.finditer(passage):
         raw, scale_word = m.group(1), (m.group(2) or "").lower()
@@ -172,12 +195,12 @@ def value_in_passage(value: str, passage: str,
         # (_NUM_RE captures sentence-final years as "2024.", hence the strip.)
         bare = raw.rstrip(".")
         if _YEARISH.match(bare) and \
-                _FISCAL_CTX.search(passage[max(0, m.start(1) - 16):m.start(1)]):
+                _FISCAL_CTX.search(passage[max(0, m.start(1) - 34):m.start(1)]):
             continue
 
         if values_agree(target, found, tolerance=tolerance):
             return True
-        for scale in sentence_scales(m.start()):
+        for scale in applicable_scales(m.start()):
             if values_agree(target, found * scale, tolerance=tolerance):
                 return True
     return False

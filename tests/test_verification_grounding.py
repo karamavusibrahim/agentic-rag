@@ -116,3 +116,21 @@ class TestHallucinationShapes:
         # 1900-2099 token threw away real values; only fiscal context makes a
         # four-digit token a date.
         assert value_in_passage("$2.024 billion", "Revenue (in millions): 2024")
+
+
+class TestCaptionScope:
+    """A caption governs what follows it until superseded, plus its sentence."""
+
+    def test_a_caption_in_an_earlier_sentence_still_governs(self):
+        # "Figures are in millions." then the numbers -- the standard filing
+        # pattern that sentence-only scoping broke.
+        assert value_in_passage("$2.024 billion",
+                                "Figures are in millions. Revenue was 2,024.")
+
+    def test_fiscal_context_survives_intervening_words(self):
+        # "for the fiscal year ended 2024" and "year ending December 31, 2024"
+        # are dates; the keyword sits a few tokens back from the year.
+        assert not value_in_passage(
+            "$2.024 billion", "For the fiscal year ended 2024 (in millions).")
+        assert not value_in_passage(
+            "$2.024 billion", "year ending December 31, 2024 (in millions)")

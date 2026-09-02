@@ -304,3 +304,28 @@ figure reached fewer answers with it on, in arms that were not given identical
 corruptions" — an observation, not an identified effect. The stale
 one-fact/API-rerun passages earlier in this file now carry their corrections
 inline. Test count at this commit: **95** (59 inherited from `main`).
+
+
+---
+
+## Sixth pass
+
+- **Caption scope is now "nearest preceding caption, plus same sentence".**
+  Sentence-only scoping had broken the standard filing pattern where the
+  caption is its own sentence ("Figures are in millions. Revenue was 2,024."),
+  which the review caught. The union respects both that pattern and the
+  cross-table case: a caption governs what follows it until superseded, and a
+  trailing same-sentence caption still covers its own numbers. Pinned.
+- **Fiscal context now survives intervening words.** "For the fiscal year
+  ended 2024" and "year ending December 31, 2024" escaped a keyword-adjacent
+  test; the context window also had to widen (the pattern allowed a 24-char
+  gap that the 16-char slice could never show it). Pinned.
+- **`distinct_facts` renamed to `distinct_concept_tokens`** — the field counts
+  concept tokens in qids (3 here), not atomic source figures (7), and four
+  passes of review kept re-flagging the gap between name and measurement. It
+  is now named for what it measures, with the limitation in a comment. Stale
+  references to the old name earlier in this file stand as history.
+
+Still open, unchanged: ordinary extraction is ungrounded (the largest hole),
+relgrep truncation, `Conflict.render()` citation omission, mention-order
+compare grading, and the injection artifact's pre-resolver vintage.
