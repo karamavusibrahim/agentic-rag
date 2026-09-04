@@ -30,9 +30,11 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Sequence
 
+import numpy as np
+
 from sec_rag.retrieve.hybrid import Hit, Retriever
 
-from .nvidia import rerank
+from .nvidia import embed, rerank
 
 # Cap on how many grep matches are sent to the hosted reranker in one call.
 RERANK_POOL = 100
@@ -79,9 +81,18 @@ def extract_anchors(query: str,
 
 
 def grep_chunks(chunks: Sequence[dict[str, Any]], tickers: set[str],
-                years: set[str], soft: set[str]) -> list[dict[str, Any]]:
+                years: set[str], soft: set[str],
+                score: Callable[[Sequence[dict[str, Any]]], Sequence[float]] | None = None,
+                ) -> list[dict[str, Any]]:
     """Conjunctive exact-match filter: company AND year must both hold
-    (when the query names them); soft terms only order the matches."""
+    (when the query names them). When the match set exceeds the reranker
+    pool it is ordered before truncation -- by soft-term hits first, then by
+    `score` (dense similarity, supplied by the caller) -- so that what is cut
+    is what looked least relevant, not what happened to sit last in corpus
+    order. Without `score`, a query with no soft terms over a large match set
+    was truncated in corpus order and could drop the one chunk that answered
+    it before the reranker ever saw it.
+    """
     matched = []
     for c in chunks:
         if tickers and c.get("ticker") not in tickers:
@@ -91,11 +102,17 @@ def grep_chunks(chunks: Sequence[dict[str, Any]], tickers: set[str],
             if not any(y in hay for y in years):
                 continue
         matched.append(c)
-    if len(matched) > RERANK_POOL and soft:
+    if len(matched) > RERANK_POOL:
+        sims = list(score(matched)) if score is not None else [0.0] * len(matched)
+
         def soft_hits(c: dict[str, Any]) -> int:
             hay = (c.get("breadcrumb", "") + " " + c.get("text", "")).lower()
             return sum(1 for w in soft if w in hay)
-        matched.sort(key=soft_hits, reverse=True)
+
+        order = sorted(range(len(matched)),
+                       key=lambda i: (soft_hits(matched[i]), sims[i]),
+                       reverse=True)
+        matched = [matched[i] for i in order]
     return matched[:RERANK_POOL]
 
 
@@ -115,12 +132,24 @@ def make_search(retriever: Retriever, *, mode: str = "dense",
 
     chunks = retriever.index.chunks
     aliases = company_aliases(chunks)
+    row_of = {id(c): i for i, c in enumerate(chunks)}
 
     def relgrep_search(query: str, k: int) -> list[Hit]:
         tickers, years, soft = extract_anchors(query, aliases)
         if not tickers and not years:
             return dense_search(query, k)  # nothing literal to grep on
-        matched = grep_chunks(chunks, tickers, years, soft)
+
+        def dense_scores(subset: Sequence[dict[str, Any]]) -> list[float]:
+            # Cosine against the stored, normalised chunk vectors: one query
+            # embedding, no extra retrieval. Only called when the match set
+            # exceeds the reranker pool.
+            qv = np.asarray(embed([query], model=retriever.index.embed_model,
+                                  input_type="query")[0], dtype=np.float32)
+            qv /= np.linalg.norm(qv) or 1.0
+            rows = [row_of[id(c)] for c in subset]
+            return (retriever.index.vectors[rows] @ qv).tolist()
+
+        matched = grep_chunks(chunks, tickers, years, soft, score=dense_scores)
         if len(matched) < k:
             return dense_search(query, k)
         passages = [c["breadcrumb"] + "\n" + c["text"] for c in matched]

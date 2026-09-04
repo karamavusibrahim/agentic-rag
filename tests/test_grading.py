@@ -122,6 +122,56 @@ class TestNumbersIn:
         assert -5.2 in vals and 5.2 in vals
 
 
+class TestComparisonObjects:
+    """A ticker inside "compared with X" / "than X" is the object of the
+    comparison, not the subject of the claim."""
+
+    def test_compared_with_names_the_other_company_first(self):
+        assert grade_categorical("Compared with MSFT, AAPL reported higher net income.",
+                                 "AAPL", "MSFT") == "correct"
+        assert grade_categorical("Compared with MSFT, AAPL reported higher net income.",
+                                 "MSFT", "AAPL") == "wrong"
+
+    def test_than_phrase_does_not_move_the_subject(self):
+        assert grade_categorical("AAPL's net income was higher than MSFT's.",
+                                 "AAPL", "MSFT") == "correct"
+        assert grade_categorical("Relative to AAPL, MSFT had lower net income.",
+                                 "AAPL", "MSFT") == "correct"
+
+
+class TestNullDenominator:
+    """The null control divides by the answerable numeric questions the
+    accuracy is computed on, not by every question."""
+
+    def test_controls_and_categorical_questions_are_excluded(self):
+        from run_agent_eval import run_config
+
+        class Trace:
+            def __init__(self, answer):
+                self.answer, self.evidence, self.conflicts = answer, [], []
+                self.verification = None
+
+        class Agent:
+            def run(self, question):
+                return Trace("The figure is 9.9%, and also 12.5% and 42.")
+
+        qs = [
+            {"qid": "a", "type": "ratio", "question": "?", "answer_numeric": 9.9,
+             "answer_unit": "percent"},
+            {"qid": "b", "type": "ratio", "question": "?", "answer_numeric": 12.5,
+             "answer_unit": "percent"},
+            {"qid": "c", "type": "unanswerable", "question": "?",
+             "expect_abstain": True, "answer_numeric": 42.0},
+            {"qid": "d", "type": "compare", "question": "AAPL or MSFT?",
+             "answer_categorical": "AAPL"},
+        ]
+        r = run_config(Agent(), qs, "t", None)
+        assert r["null_hit_denominator"] == 2
+        assert r["null_hits"] == 2          # a matches b's gold and vice versa
+        assert r["null_hit_rate"] == 1.0
+        assert r["n"] == 4
+
+
 class TestErrorSurfacing:
     """An extraction that failed on an API error must stay distinguishable from
     a model honestly reporting found=false; otherwise an outage-wide abstain

@@ -470,6 +470,41 @@ promise, and strict mode remains available for agents with chattier outputs.
 
 ---
 
+### 5.8 Extraction grounding, and an optional corrective-retrieval hop
+
+Two changes to the agent itself, one measured in the only sense available
+offline (it fails a reproduction that used to pass) and one deliberately
+unmeasured.
+
+**Every numeric extraction is grounded.** §5.2's fabrication was consistent
+and therefore invisible to contradiction detection; the guard for it was
+`period_mismatch`. A second, simpler fabrication had no guard at all: the
+extractor returns `{"found": true, "value": "$999 million", "passage_number":
+1}` against a passage that says $100 million, and the citation to passage 1
+lends the invented figure a source. The resolver has refused that shape since
+§5.4 (`value_in_passage`, over exactly the text it showed the model); ordinary
+extractions now go through the same check, over exactly the 1,500 characters
+the extractor was shown. A rejected figure becomes "not found" for synthesis
+and is kept on the trace as `ungrounded`, so the next run can report how often
+it happened. Numeric values only — a textual value would face a verbatim
+substring test, and rejecting every paraphrase is a different error. The
+saved n=30 traces predate this rule; the rates in §5.5 are what the agent
+did without it.
+
+**Optional corrective retrieval** (`--retrieval-grader`; Corrective RAG,
+Yan et al., arXiv 2401.15884). A small model grades each hop's passages as
+relevant / ambiguous / irrelevant for the sub-question before extraction.
+Relevant: keep the relevant and ambiguous passages, drop the rest. Ambiguous
+only: keep them and add one reformulated query's hits. Nothing usable:
+re-query once with the agent's own filing-vocabulary reformulation and grade
+that; if it is no better, hand the extractor the original passages, so the
+grader narrows and never starves a hop. No web fallback — the paper's — since
+the eval's premise is that the answer is in the corpus or the agent must say
+so. It costs one small call per hop, is tested offline through injected
+calls, and has **not** been run ON/OFF against the hosted API; the trace
+records the action per hop (`retrieval_action`) so that comparison can be
+stratified when it is made. No number is claimed for it.
+
 ## 6. Engineering notes
 
 **Model availability is not stable.** Mid-development, two models went from
@@ -544,10 +579,13 @@ wall-clock deadline per item.
   Wilson interval of [0.64, 0.93], controls 6/6. Still one corpus, one run per
   question of a nondeterministic agent, and 53 unused questions in the eval
   set.
-- **An API outage is indistinguishable from honesty.** Failed extractions are
-  swallowed into "not found" with no logging, so during an outage the agent
-  abstains everywhere and the unanswerable controls pass vacuously. Errors
-  need to be surfaced as their own outcome, not folded into abstention.
+- **An API outage was indistinguishable from honesty.** Failed extractions
+  were swallowed into "not found" with no logging, so during an outage the
+  agent abstained everywhere and the unanswerable controls passed vacuously.
+  Extraction errors now travel on the evidence (`Evidence.error`) and the
+  grader reports them as their own outcomes (`abstain_due_to_error`,
+  `empty_answer`) rather than folding them into abstention; the n=30 headline
+  was graded under that rule.
 - **The contradiction check is validated only under synthetic faults** (§5.3):
   detection 5/5 and contamination 3/5 → 1/5 under injection, but zero conflicts
   have ever fired on natural data, and one corruption pattern (×0.33) is not a

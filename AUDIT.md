@@ -33,8 +33,9 @@ Two paths, both closed:
 
 `src/agentic_rag/agent/loop.py`
 
-`if not data.get("found")` is a truthiness test. Hosted models return
-`"found": "false"` as a *string* often enough to matter, and a non-empty string
+`if not data.get("found")` is a truthiness test. A hosted model can return
+`"found": "false"` as a *string* (no committed trace shows it happening; the
+guard exists because the failure is silent when it does), and a non-empty string
 is truthy — so a refusal became a positive extraction, and `str(False)` then
 rendered the value as the literal text `"False"` into the synthesis prompt.
 Now requires `is True`.
@@ -56,7 +57,8 @@ quoted "correct answers 0 → 2" off those unequal bases.
 
 Also: 4 of the 5 questions ask about R&D FY2024 in different shapes
 (ratio/delta/compare/trend), so they are variants of one fact rather than five
-independent trials; and `detection_rate` divided by `max(len(inj), 1)`, which
+independent trials [corrected in the third pass, below: seven source figures
+under three concept tokens — correlated, not duplicates]; and `detection_rate` divided by `max(len(inj), 1)`, which
 reports `0.0` — indistinguishable from "the guard failed" — when nothing was
 actually injected.
 
@@ -151,8 +153,9 @@ Recorded rather than quietly dropped:
   least five distinct atomic figures. They share one AAPL R&D value; they are
   correlated, not duplicates.
 - **`main` had 59 tests, not 69.** The earlier count credited this branch's own
-  additions to the baseline. The suite has grown each pass; the current count is stated once, in the
-  fifth-pass section.
+  additions to the baseline. The suite has grown each pass; every count in
+  this file is historical, and the suite itself (`uv run pytest`) is the
+  only current one.
 - **The null-model margin is computable offline** (12/30 = 0.40 over the merged
   n=30 traces). The claim earlier in this file that it needed an API rerun is
   withdrawn.
@@ -189,7 +192,8 @@ Reverting the extractor's truthiness, boolean-index or zero handling left every
 test green, because all of them called helpers. `test_resolve_behaviour.py` now
 drives `MultiHopAgent.extract` through a stubbed model for all six cases.
 
-Suite at the third pass: 87 tests; see the fifth pass for the current count.
+Suite at the third pass: 87 tests. Later passes quote later counts; all of
+them are historical, and `uv run pytest` is the current one.
 
 ## Still open after three passes
 
@@ -351,3 +355,63 @@ Both pinned. This is the third iteration of the scope rules; each round's
 false positive and false negative were adjacent, which is the nature of
 grounding numbers in prose — the guard documents itself as grounding, not
 correctness, and that framing is doing real work.
+
+
+---
+
+## Eighth pass
+
+Two independent reviews of the seventh pass (3 and 4 September) agreed on
+the open list. Fixed, each with a test that drives the production path:
+
+- **Ordinary extractions are grounded.** The largest hole every pass named:
+  an extractor reply citing a real passage for a figure it does not contain
+  entered synthesis with the citation attached. Every numeric extraction now
+  passes `value_in_passage` over exactly the 1,500 characters the extractor
+  was shown (`EXTRACT_CHARS`, the same window discipline as
+  `VERIFY_CHARS`); a rejected figure becomes "not found" and stays on the
+  trace as `ungrounded`. Textual values are exempt on purpose — a verbatim
+  substring test would reject every paraphrase — which is the same
+  numeric-only scope as contradiction detection.
+- **Caption scope, third revision.** A caption that precedes every table
+  heading is document-level and reaches past headings ("Amounts are in
+  millions. Table 1: ..." was being rejected); a caption that follows a
+  heading belongs to that table and the next heading ends it. Sentence
+  boundaries now include line breaks, so a newline-separated Table A
+  caption no longer scales Table B's headcount. Fiscal-date bridges admit
+  the connectives filings use ("ended on", "as of", "December 31st,").
+- **Resolved conflicts carry a citation.** `Conflict.render()` printed the
+  one figure the synthesizer could not point at; it now renders
+  `[citation, chunk id]` like ordinary evidence (`resolved_citation`).
+- **The null control's denominator is the accuracy's.** `run_config`
+  divided null hits by every question, controls and categorical included,
+  which a rerun would have published as 12/30 = 0.40 against the correct
+  12/24 = 0.50 in the docs. It now divides by the answerable numeric
+  questions and records the denominator.
+- **Comparison objects are not subjects.** "Compared with MSFT, AAPL
+  reported higher net income" graded wrong for AAPL because MSFT was
+  mentioned first; the ticker inside a "compared with / than / versus"
+  phrase is now removed before the subject is located.
+- **relgrep truncates by relevance, not corpus order.** Over the reranker
+  pool with no soft terms, the last-matching chunk was cut before the
+  reranker saw it; the match set is now ordered by soft hits and then by
+  dense similarity (one query embedding) before truncation.
+- **Prose corrected**: the string-"false" guard no longer claims the failure
+  happens "often enough" (no committed trace shows it); the historical
+  "variants of one fact" line points at its correction; test counts in this
+  file are declared historical, with the suite as the only current count;
+  the injection paragraph in README says "direction under one fault
+  pattern", not "reduces contamination"; REPORT's outage limitation is in
+  the past tense, since errors have been surfaced as their own outcome
+  since the first commit.
+
+Added, optional, unmeasured: a corrective-retrieval hop (CRAG,
+arXiv 2401.15884) behind `--retrieval-grader`, with the action recorded per
+hop. README and REPORT §5.8 say what it is and that no number exists for it.
+
+Still open: the saved traces and the injection artifact predate every
+resolver and extractor change above, so the published rates describe the
+agent as it was; metric-blind grounding (revenue $100M grounded by an
+operating-expense $100M in the same passage) is a limit of number matching
+that only concept-aware labels would close; and the injection harness still
+injects whichever concurrent extraction wins, so its arms stay unpaired.

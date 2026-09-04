@@ -78,6 +78,15 @@ _COMPARATIVE = re.compile(
 # MSFT's" names the smaller company first, so the verdict must be inverted.
 _COMPARATIVE_INV = re.compile(
     r"\b(lower|smaller|less|fewer|trailed|lagged|behind|spent less)\b", re.I)
+# A ticker inside a comparison phrase is the *object* of the comparison, not
+# the subject of the claim: "Compared with MSFT, AAPL reported higher net
+# income" names MSFT first and claims AAPL is larger. First-mention grading
+# read that as MSFT's claim and marked a correct answer wrong. The phrase is
+# removed before the subject is located; the ticker part is case-sensitive
+# because tickers are upper-case and the connective is not.
+_COMPARISON_OBJECT = re.compile(
+    r"(?i:compared\s+(?:with|to)|relative\s+to|versus|vs\.?|than|against|"
+    r"over)\s+(?:the\s+)?[A-Z]{2,5}(?:'s)?\b")
 # "net income decreased by 3.36%" states -3.36 without a minus sign; the old
 # grader marked every correctly-worded negative delta wrong.
 _DOWNWARD = re.compile(
@@ -175,7 +184,10 @@ def grade_categorical(answer: str, gold: str, other: str) -> str:
                   key=lambda m: m.start(), default=None)
         if cue is None:
             continue
-        up = sentence.upper()
+        # Locate the subject in the sentence with comparison objects removed;
+        # the cue position is taken from the original so the negation window
+        # below still looks at the right text.
+        up = _COMPARISON_OBJECT.sub(" ", sentence).upper()
         gi, oi = up.find(gold), up.find(other)
         if gi < 0 and oi < 0:
             continue
@@ -265,6 +277,7 @@ def run_config(agent: MultiHopAgent, questions: list[dict[str, Any]],
                strict: bool = False) -> dict[str, Any]:
     outcomes: Counter[str] = Counter()
     nulls = 0
+    null_eligible = 0
     n_numbers = 0
     conflicts_seen = 0
     traces: list[dict[str, Any]] = []
@@ -290,7 +303,15 @@ def run_config(agent: MultiHopAgent, questions: list[dict[str, Any]],
                       or (q.get("expect_abstain") and verdict == "correct")):
             verdict = "abstain_due_to_error"
         outcomes[verdict] += 1
-        nulls += null_hit(q, answer, questions)
+        # The null control is a control *for the accuracy number*, so it is
+        # computed over the same questions accuracy is: answerable ones with
+        # a numeric gold. Dividing by every question -- controls and
+        # categorical ones included, which cannot null-hit -- deflated the
+        # rate (12/30 = 0.40) below the published, correct 12/24 = 0.50 and a
+        # rerun would have republished the rejected denominator.
+        if q.get("answer_numeric") is not None and not q.get("expect_abstain"):
+            null_eligible += 1
+            nulls += null_hit(q, answer, questions)
         n_numbers += count_figures(answer)
         traces.append({"qid": q["qid"], "type": q["type"], "verdict": verdict,
                        "gold": q.get("answer_numeric") or q.get("answer_categorical"),
@@ -315,7 +336,9 @@ def run_config(agent: MultiHopAgent, questions: list[dict[str, Any]],
         "accuracy": outcomes["correct"] / n,
         "wrong_rate": outcomes["wrong"] / n,
         "abstain_rate": outcomes["abstain"] / n,
-        "null_hit_rate": nulls / n,
+        "null_hit_rate": nulls / max(null_eligible, 1),
+        "null_hit_denominator": null_eligible,
+        "null_hits": nulls,
         "numbers_per_answer": round(n_numbers / n, 1),
         "conflicts_detected": conflicts_seen,
         "seconds": round(time.time() - t0, 1),
@@ -349,6 +372,10 @@ def main() -> int:
     ap.add_argument("--search-mode", choices=("dense", "relgrep"), default="dense",
                     help="relgrep = optional relevance-guided corpus grep "
                          "(arXiv 2607.24223); dense is the measured default")
+    ap.add_argument("--retrieval-grader", action="store_true",
+                    help="optional corrective retrieval (CRAG, arXiv 2401.15884): "
+                         "grade each hop's passages and re-query once when they "
+                         "are off-target; applies to every arm; unmeasured")
     ap.add_argument("--out", type=Path, default=Path("eval/results/agent.json"))
     args = ap.parse_args()
 
@@ -382,12 +409,14 @@ def main() -> int:
         print("=== contradiction check ON ===")
         rows.append(run_config(
             MultiHopAgent(search,
-                          verify_answer=None if args.verify == "off" else args.verify),
+                          verify_answer=None if args.verify == "off" else args.verify,
+                          retrieval_grader=args.retrieval_grader),
             questions, "contradiction check ON",
             Path("eval/results/traces_on.json"), strict=args.grade == "strict"))
     if args.config in ("off", "both") or args.ablate:
         print("\n=== contradiction check OFF ===")
-        rows.append(run_config(MultiHopAgent(search, check_contradictions=False),
+        rows.append(run_config(MultiHopAgent(search, check_contradictions=False,
+                                             retrieval_grader=args.retrieval_grader),
                                questions, "contradiction check OFF",
                                Path("eval/results/traces_off.json")))
 

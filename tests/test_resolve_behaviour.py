@@ -125,9 +125,44 @@ def test_an_out_of_range_passage_number_is_rejected():
 
 
 def test_a_numeric_zero_is_a_real_value():
-    # `str(value or "")` mapped 0 to empty and discarded the extraction.
-    e = extract({"found": True, "value": 0, "passage_number": 1})
+    # `str(value or "")` mapped 0 to empty and discarded the extraction. The
+    # passage states the zero, as it must now that extractions are grounded.
+    e = extract({"found": True, "value": 0, "passage_number": 1},
+                text="Restructuring charges were $0 for fiscal 2025.")
     assert e.found and e.value == "0"
+
+
+def test_a_figure_absent_from_the_cited_passage_is_discarded():
+    """The largest hole the reviews kept open: a real passage cited for a
+    figure it does not contain lent the invented figure a source."""
+    e = extract({"found": True, "value": "$999 million", "passage_number": 1,
+                 "entity": "NVDA", "metric": "R&D", "period": "FY2025"})
+    assert not e.found
+    assert e.ungrounded == "$999 million"
+    assert e.entity == "NVDA" and e.period == "FY2025"
+
+
+def test_a_textual_extraction_is_not_subjected_to_substring_grounding():
+    # A paraphrased textual value would fail a verbatim test; grounding is
+    # numeric-only, the same scope as contradiction detection.
+    e = extract({"found": True, "value": "supply constraints in the data center segment",
+                 "passage_number": 1},
+                text="Management cited constraints on data-center supply.")
+    assert e.found
+
+
+def test_extraction_grounding_uses_only_the_text_the_extractor_was_shown():
+    from agentic_rag.agent.loop import EXTRACT_CHARS
+    text = "x" * EXTRACT_CHARS + " Research and development was 12,914 (in millions)."
+    e = extract({"found": True, "value": "$12,914 million", "passage_number": 1},
+                text=text)
+    assert not e.found, "a figure past the truncation point counted as grounded"
+
+
+def test_a_resolved_conflict_renders_its_citation():
+    c = run({"correct_value": "$12,914 million", "passage_number": 1})
+    assert c.resolved_citation == "[c1]"
+    assert "[[c1], chunk c1]" in c.render(), c.render()
 
 
 def test_an_empty_value_is_not_an_extraction():

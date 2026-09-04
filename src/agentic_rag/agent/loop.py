@@ -42,7 +42,19 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from ..nvidia import chat, chat_json, chat_json_chain
-from .contradictions import Conflict, find_conflicts, period_mismatch, resolve
+from .contradictions import (
+    Conflict,
+    find_conflicts,
+    parse_magnitude,
+    period_mismatch,
+    resolve,
+    value_in_passage,
+)
+
+# How much of each passage the extractor is shown, and therefore how much of
+# it may ground the figure it returns. The two must be the same number -- the
+# resolver learned that the hard way (contradictions.VERIFY_CHARS).
+EXTRACT_CHARS = 1500
 
 # Model availability on build.nvidia.com is not stable, and the failure mode is
 # abrupt: `qwen/qwen3-next-80b-a3b-instruct` and `qwen/qwen3.5-397b-a17b` both
@@ -92,6 +104,13 @@ class Evidence:
     # everywhere, and an eval that cannot see the difference scores that
     # outage as honesty.
     error: str | None = None
+    # Set when the extractor returned a figure that does not occur in the
+    # passage it cited. The extraction is discarded (found=False) but the
+    # rejected value is kept so traces can count how often it happens.
+    ungrounded: str | None = None
+    # What the optional retrieval grader did for this hop, if it ran:
+    # "correct" | "ambiguous" | "incorrect" | "skipped". None when disabled.
+    retrieval_action: str | None = None
 
     def render(self) -> str:
         if not self.found:
@@ -297,6 +316,7 @@ class MultiHopAgent:
         max_rounds: int = 2,
         check_contradictions: bool = True,
         verify_answer: str | None = None,
+        retrieval_grader: bool = False,
     ):
         """`search(query, k)` returns objects exposing .text, .chunk_id and
         .citation() -- the sec_rag Retriever satisfies this, but any retriever
@@ -311,6 +331,11 @@ class MultiHopAgent:
         # and that claim is only worth anything if it can be measured against
         # the same agent with the check disabled.
         self.check_contradictions = check_contradictions
+        # Optional corrective retrieval (CRAG, arXiv 2401.15884): grade each
+        # hop's passages before extraction and re-query once when they are
+        # off-target. Off by default and unmeasured -- one extra small model
+        # call per hop; see agent/retrieval_grader.py.
+        self.retrieval_grader = retrieval_grader
         # Optional post-synthesis verification. "dual" runs two SPECIALIZED
         # critics -- one verifying that every figure in the answer traces to
         # the extracted evidence, one verifying the calculation/reasoning --
@@ -341,11 +366,21 @@ class MultiHopAgent:
 
     def extract(self, sub_question: str) -> Evidence:
         hits = list(self.search(sub_question, self.per_hop_k))
+        retrieval_action: str | None = None
+        if self.retrieval_grader and hits:
+            from .retrieval_grader import correct_retrieval
+            corr = correct_retrieval(
+                sub_question, hits, models=self.planner_models,
+                search=self.search, reformulate=self.reformulate,
+                k=self.per_hop_k, chat_json_chain=chat_json_chain)
+            hits, retrieval_action = list(corr.hits), corr.action
         if not hits:
-            return Evidence(sub_question, False, None, None, None, None)
+            return Evidence(sub_question, False, None, None, None, None,
+                            retrieval_action=retrieval_action)
 
         passages = "\n\n".join(
-            f"[{i}] ({h.citation()})\n{h.text[:1500]}" for i, h in enumerate(hits, 1)
+            f"[{i}] ({h.citation()})\n{h.text[:EXTRACT_CHARS]}"
+            for i, h in enumerate(hits, 1)
         )
         try:
             data, _ = chat_json_chain(
@@ -365,11 +400,12 @@ class MultiHopAgent:
         met = (data.get("metric") or None)
         per = (data.get("period") or None)
 
-        # `found` has to be a real boolean. Models return the *string* "false"
-        # often enough that a plain truthiness test silently converts a refusal
-        # into a positive extraction -- and `str(False)` then renders the value
-        # as the literal text "False", which flows into synthesis as if it were
-        # a figure read off a filing.
+        # `found` has to be a real boolean. A model can return the *string*
+        # "false", and a plain truthiness test then silently converts a refusal
+        # into a positive extraction -- `str(False)` renders the value as the
+        # literal text "False", which flows into synthesis as if it were a
+        # figure read off a filing. No committed trace shows this happening;
+        # the guard is there because the failure is silent when it does.
         if data.get("found") is not True:
             return Evidence(sub_question, False, None, None, None, None,
                             entity=ent, metric=met, period=per)
@@ -416,6 +452,23 @@ class MultiHopAgent:
             return Evidence(sub_question, False, None, None, None, None,
                             entity=ent, metric=met, period=per)
         hit = hits[n - 1]
+
+        # The largest remaining hole, now closed: an extractor could cite a
+        # real passage for a figure that passage does not contain --
+        # {"value": "$999 million", "passage_number": 1} against "Revenue was
+        # $100 million" -- and the citation lent the invented figure the
+        # authority of a source. The same grounding rule the conflict
+        # resolver applies (`value_in_passage`, over exactly the text the
+        # model was shown) applies here. Numeric values only: for a textual
+        # value the check would be a verbatim-substring test, and rejecting
+        # every paraphrased textual extraction is a different mistake.
+        if parse_magnitude(value) is not None and \
+                not value_in_passage(value, hit.text[:EXTRACT_CHARS]):
+            print(f"    extraction {value!r} does not appear in the passage "
+                  f"it cites ({hit.citation()}); discarded", file=sys.stderr)
+            return Evidence(sub_question, False, None, None, None, None,
+                            entity=ent, metric=met, period=per,
+                            ungrounded=value, retrieval_action=retrieval_action)
         return Evidence(
             sub_question=sub_question,
             found=True,
@@ -426,6 +479,7 @@ class MultiHopAgent:
             entity=ent,
             metric=met,
             period=per,
+            retrieval_action=retrieval_action,
         )
 
     def critique(self, question: str, evidence: Sequence[Evidence]) -> tuple[bool, list[str]]:

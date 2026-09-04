@@ -37,6 +37,9 @@ def main() -> int:
     ap.add_argument("--search-mode", choices=("dense", "relgrep"), default="dense",
                     help="relgrep = optional relevance-guided corpus grep "
                          "(arXiv 2607.24223)")
+    ap.add_argument("--retrieval-grader", action="store_true",
+                    help="optional corrective retrieval (CRAG, arXiv 2401.15884); "
+                         "one extra small model call per hop")
     ap.add_argument("--trace", type=Path, help="write the full trace as JSON")
     args = ap.parse_args()
 
@@ -54,7 +57,8 @@ def main() -> int:
     retriever = Retriever(index)
     search = make_search(retriever, mode=args.search_mode, candidates=40)
 
-    agent = MultiHopAgent(search, per_hop_k=args.per_hop_k, max_rounds=args.max_rounds)
+    agent = MultiHopAgent(search, per_hop_k=args.per_hop_k, max_rounds=args.max_rounds,
+                          retrieval_grader=args.retrieval_grader)
 
     print(f"Q: {question}\n{'-' * 70}")
     trace = agent.run(question, verbose=True)

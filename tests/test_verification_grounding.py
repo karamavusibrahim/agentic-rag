@@ -153,3 +153,33 @@ class TestScopeBoundaries:
         assert not value_in_passage(
             "$3 billion",
             "Table A (in millions): Revenue 1. Table B: Employees 3,000.")
+
+    def test_a_document_level_caption_reaches_past_table_headings(self):
+        # The seventh-pass rule ended every caption at the next heading and
+        # rejected the standard "Amounts are in millions. Table 1: ..." form.
+        assert value_in_passage("$2.024 billion",
+                                "Amounts are in millions. Table 1: Revenue 2,024.")
+        assert value_in_passage("$2.024 billion",
+                                "Figures are in millions. Table B: Revenue 2,024.")
+
+    def test_common_date_connectives_bridge_keyword_and_year(self):
+        for passage in (
+            "For the fiscal year ended on December 31, 2024 (in millions).",
+            "For the fiscal year ended December 31st, 2024 (in millions).",
+            "as of the end of the fiscal year 2024 (in millions).",
+        ):
+            assert not value_in_passage("$2.024 billion", passage), passage
+        # ...while a non-date word still breaks the bridge:
+        assert value_in_passage("$2.024 billion",
+                                "For the year, revenue was 2024 (in millions).")
+
+    def test_line_breaks_bound_a_caption_sentence(self):
+        # Newline-separated tables are the common shape of a serialised
+        # filing chunk; without newline boundaries the whole passage was one
+        # "sentence" and every caption applied to every number.
+        assert not value_in_passage(
+            "$3B",
+            "Table A (in thousands)\nEmployees 3,000\nTable B (in millions)\nRevenue 1")
+        assert value_in_passage(
+            "$2.024 billion",
+            "Table A (in thousands)\nEmployees 3,000\nTable B (in millions)\nRevenue 2,024")

@@ -266,6 +266,29 @@ uv run python eval/build_multihop_eval.py
 uv run python eval/run_agent_eval.py --limit 5 --types ratio,delta,compare,trend
 ```
 
+**Optional: corrective retrieval** (`--retrieval-grader`, off by default).
+Corrective RAG ([arXiv 2401.15884](https://arxiv.org/abs/2401.15884)) puts a
+lightweight evaluator between retrieval and generation: grade the hop's
+passages for the sub-question, keep the relevant ones, and when nothing is
+relevant re-query once — here with the agent's existing filing-vocabulary
+reformulation rather than the paper's web search, because the whole point of
+this corpus is that the answer is in the six filings or the agent must say so.
+The grader never leaves a hop with fewer passages than it retrieved unless the
+re-query graded better, and a failed grade skips rather than blocks. One small
+model call per hop, tested offline through injected calls, and **unmeasured**:
+no ON/OFF comparison has been run against the hosted API, so no number is
+quoted. Each `Evidence` records the action taken (`retrieval_action`) so a
+run that does measure it can stratify by it.
+
+**Ordinary extractions are now grounded the way resolved conflicts are.** An
+extractor reply citing a real passage for a figure that passage does not
+contain used to enter synthesis with that citation attached. The same
+`value_in_passage` check the resolver applies now runs on every numeric
+extraction, over exactly the text the extractor was shown; a rejected figure
+is kept on the trace (`ungrounded`) so its frequency can be counted. Textual
+values are not subjected to it — a verbatim-substring test would reject every
+paraphrase — which is the same numeric-only scope contradiction detection has.
+
 ## Model availability is not stable
 
 Mid-development, two models went from working to dead:
@@ -342,15 +365,17 @@ actively hurt.
 
 ```
 src/agentic_rag/
-  nvidia.py               NIM client with retry + validating model-fallback chains
-  agent/loop.py           plan / extract / critique / reformulate / synthesize
-  agent/contradictions.py magnitude parsing, grouping, conflict detection,
-                          resolution, and period-mismatch rejection
+  nvidia.py                  NIM client with retry + validating model-fallback chains
+  agent/loop.py              plan / extract (grounded) / critique / reformulate / synthesize
+  agent/contradictions.py    magnitude parsing, grouping, conflict detection,
+                             resolution, period-mismatch rejection, value grounding
+  agent/retrieval_grader.py  optional: corrective retrieval (grade passages, re-query)
+  search_modes.py            dense (default) and optional relgrep search
 eval/
-  build_multihop_eval.py  XBRL-computed answers for 2- and 4-hop questions
-  run_agent_eval.py       three-way grading + null-model control + ablation switch
+  build_multihop_eval.py     XBRL-computed answers for 2- and 4-hop questions
+  run_agent_eval.py          three-way grading + null-model control + ablation switch
 tests/
-  test_contradictions.py  33 tests, incl. both observed failures as regressions
+  test_*.py                  offline; every guard driven through the production path
 scripts/
   ask.py                  CLI entry point
   probe_models.py         which hosted models are alive and return usable JSON
@@ -375,11 +400,13 @@ scripts/
   spend money slowly.
 - **The contradiction check has no natural end-to-end validation.** Zero
   conflicts fired across every eval run, so the ON/OFF ablation on natural data
-  is uninformative. Fault injection shows the guard fires and reduces
-  contamination when the fault is present, but over 5 correlated questions —
-  they draw on seven atomic source figures, four of them shapes over the same
-  R&D pair — with unequal gradeable denominators per arm (3 vs 2). Direction,
-  not effect size. The saved run also predates this branch's resolver changes,
+  is uninformative. Fault injection shows the guard fires, and in the saved
+  run the ON arm ended with less contamination than the OFF arm — but the
+  arms are unpaired (each injected a different corruption) and cover 5
+  correlated questions — they draw on seven atomic source figures, four of
+  them shapes over the same R&D pair — with unequal gradeable denominators
+  per arm (3 vs 2). That is a direction under one fault pattern, not a
+  measured reduction. The saved run also predates this branch's resolver changes,
   so it describes the guard as it was, not as it is.
 - **Answer accuracy is an upper bound**, not a measurement — at the n=30
   headline, the recomputed null-model hit rate is 0.50 over the same 24

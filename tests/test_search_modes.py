@@ -93,3 +93,24 @@ class TestGrepChunks:
         got = grep_chunks(many, {"AAPL"}, set(), {"revenue"})
         assert got[0]["text"] == "Total net sales and revenue details."
         assert len(got) == 100  # RERANK_POOL cap
+
+    def test_a_large_pool_without_soft_terms_is_ordered_by_score(self):
+        # 101 matches, the answer last, no soft terms: corpus-order truncation
+        # dropped it before the reranker saw it. The caller's score (dense
+        # similarity in production) decides what is cut instead.
+        many = [chunk(text=f"filler paragraph {i}") for i in range(101)]
+        many[100] = chunk(text="ANSWER")
+        got = grep_chunks(many, {"AAPL"}, set(), set(),
+                          score=lambda subset: [1.0 if c["text"] == "ANSWER" else 0.0
+                                                for c in subset])
+        assert got[0]["text"] == "ANSWER"
+        assert len(got) == 100
+
+    def test_score_is_a_tie_break_below_soft_hits(self):
+        many = [chunk(text=f"filler {i}") for i in range(101)]
+        many[5] = chunk(text="revenue mention")
+        many[100] = chunk(text="ANSWER")
+        got = grep_chunks(many, {"AAPL"}, set(), {"revenue"},
+                          score=lambda subset: [1.0 if c["text"] == "ANSWER" else 0.0
+                                                for c in subset])
+        assert [c["text"] for c in got[:2]] == ["revenue mention", "ANSWER"]

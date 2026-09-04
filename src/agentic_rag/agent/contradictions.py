@@ -98,16 +98,30 @@ _YEARISH = re.compile(r"^(19|20)\d{2}$")
 # "year ending December 31, 2024" -- the keyword may sit a few tokens back.
 # The tokens in between must themselves be date-ish: an any-word gap turned
 # "For the year, revenue was 2024" into a date and threw away a real value.
-# A new table announced without its own scale caption ends the previous
-# caption's reach. Deliberately narrow: only an explicit heading form.
-_TABLE_HEADING = re.compile(r"\b(?:table|schedule|exhibit)\s+[\w.]+\s*:", re.I)
+# A new table announced without its own scale caption ends the reach of a
+# caption that belonged to an earlier table. Deliberately narrow: only an
+# explicit heading form, with or without a parenthetical after the label
+# ("Table B:", "Table A (in thousands):").
+_TABLE_HEADING = re.compile(
+    r"\b(?:table|schedule|exhibit)\s+[\w.]+\s*(?:\([^)]*\))?\s*:", re.I)
 
+# Bridging tokens between the keyword and the year: the connectives filings
+# actually use ("ended on", "as of", "ending the"), month names, and day
+# numbers with or without an ordinal suffix ("December 31st, 2024"). Any
+# other word breaks the bridge, which is what keeps "for the year, revenue
+# was 2024" a value.
 _FISCAL_CTX = re.compile(
     r"(?:fiscal|fy|calendar|year)\b"
-    r"(?:[\s,:]+(?:ended|ending|end|of|to|through|"
+    r"(?:[\s,:]+(?:ended|ending|end|of|to|through|on|at|as|the|and|"
     r"jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|"
-    r"sep\w*|oct\w*|nov\w*|dec\w*|\d{1,2}))*"
+    r"sep\w*|oct\w*|nov\w*|dec\w*|\d{1,2}(?:st|nd|rd|th)?))*"
     r"[\s,:]*$", re.I)
+
+# Sentence boundaries for caption scoping: ". " (decimals never have a space
+# after the point) and a line break. Tables are line-structured, and treating
+# a whole newline-separated passage as one sentence let Table A's caption on
+# one line govern Table B's numbers three lines down.
+_SENTENCE_BREAK = re.compile(r"\. |\n")
 
 
 def value_in_passage(value: str, passage: str,
@@ -153,6 +167,8 @@ def value_in_passage(value: str, passage: str,
     # its own numbers without leaking across tables.
     caption_positions = [(m.start(), _SCALES[m.group(1).lower()])
                          for m in _SCALE_CAPTION.finditer(passage)]
+    heading_positions = [m.start() for m in _TABLE_HEADING.finditer(passage)]
+    breaks = [m.start() for m in _SENTENCE_BREAK.finditer(passage)]
 
     def applicable_scales(pos: int) -> set[float]:
         """The caption(s) that plausibly govern the number at `pos`.
@@ -167,22 +183,27 @@ def value_in_passage(value: str, passage: str,
         governs what follows it, until superseded), plus any caption in the
         same sentence (a trailing "(in millions)." governs the numbers before
         it in its own sentence).
+
+        A caption's reach also depends on what it belongs to. One that
+        precedes every table heading in the passage ("Amounts are in
+        millions. Table 1: ...") is document-level and reaches past headings;
+        one that follows a heading belongs to that table, and the next
+        heading ends it -- "Table B: Employees 3,000" after Table A's caption
+        is a new scope, and carrying the old scale into it manufactured a $3B
+        figure from a headcount. The seventh-pass rule ended *every* caption
+        at the next heading and so rejected the document-level case.
         """
         scales: set[float] = set()
         preceding = [(at, sc) for at, sc in caption_positions if at < pos]
         if preceding:
             at, sc = preceding[-1]
-            # A caption governs what follows it -- until something that reads
-            # as a new table heading intervenes. "Table B: Employees 3,000"
-            # after Table A's caption is a new scope, and carrying the old
-            # scale into it manufactured a $3B figure from a headcount.
-            if not _TABLE_HEADING.search(passage, at, pos):
+            table_level = any(h < at for h in heading_positions)
+            if not (table_level and any(at < h <= pos for h in heading_positions)):
                 scales.add(sc)
-        lo = passage.rfind(". ", 0, pos)
-        lo = 0 if lo == -1 else lo + 2
-        hi = passage.find(". ", pos)
-        hi = len(passage) if hi == -1 else hi + 1
-        scales.update(sc for at, sc in caption_positions if lo <= at < hi)
+        lo = max((b for b in breaks if b < pos), default=-1)
+        lo = 0 if lo == -1 else lo + 1
+        hi = min((b for b in breaks if b >= pos), default=len(passage))
+        scales.update(sc for at, sc in caption_positions if lo <= at <= hi)
         return scales
 
     for m in _NUM_RE.finditer(passage):
@@ -228,6 +249,7 @@ class Conflict:
     candidates: list[Any] = field(default_factory=list)   # Evidence objects
     resolved_value: str | None = None
     resolved_chunk_id: str | None = None
+    resolved_citation: str | None = None
     reason: str = ""
 
     @property
@@ -238,7 +260,17 @@ class Conflict:
         entity, metric, period = self.key
         head = f"{entity} {metric} {period}"
         if self.resolved_value:
-            return f"- {head} -> {self.resolved_value} (verified; conflict resolved)"
+            # The resolved figure enters synthesis carrying more authority
+            # than the extractions it replaced, and it used to enter without
+            # a citation -- the one figure the synthesizer could not point
+            # at. Render it in the same "[citation, chunk id]" form as
+            # ordinary evidence so it is citable, and traceable, like the rest.
+            where = ""
+            if self.resolved_citation or self.resolved_chunk_id:
+                where = (f"  [{self.resolved_citation or '?'}, "
+                         f"chunk {self.resolved_chunk_id or '?'}]")
+            return (f"- {head} -> {self.resolved_value} "
+                    f"(verified; conflict resolved){where}")
         alts = "; ".join(
             f"{c.value} [{c.citation}]" for c in self.candidates if c.value
         )
@@ -468,5 +500,6 @@ def resolve(
 
     conflict.resolved_value = str(value)
     conflict.resolved_chunk_id = hit.chunk_id
+    conflict.resolved_citation = hit.citation()
     conflict.reason = str(data.get("reason") or "")
     return conflict
